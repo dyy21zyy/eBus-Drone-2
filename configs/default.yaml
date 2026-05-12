@@ -1,0 +1,7 @@
+project: ebus_drone_rl
+instance: small
+method: proposed
+seed: 1
+paths:
+  data_generated: data/generated
+  outputs: outputs
