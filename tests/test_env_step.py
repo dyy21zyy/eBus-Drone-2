@@ -65,7 +65,7 @@ def test_assignment_driven_unloading_chain():
     assert hit["unloading_volume_kg"] == expected_q
     for pid in expected:
         assert pid not in env.bus_states[trip_id]["onboard_parcel_ids"]
-        assert pid in env.station_states[station_id]["locker_parcels"]
+        assert pid in env.station_states[station_id]["locker_parcels"] or env.parcel_states[pid]["status"] in {"assigned_to_drone", "delivered"}
 
 
 def test_parcel_unloading_validation_errors():
@@ -89,3 +89,19 @@ def test_wrong_trip_station_rejected():
         get_unloading_parcels(2, 2, idx_wrong_trip, parcels)
     with pytest.raises(ValueError):
         get_unloading_parcels(1, 3, idx_wrong_station, parcels)
+
+
+def test_station_dispatch_and_delivery_integration():
+    cfg = load_yaml('configs/default.yaml')
+    inst_cfg = load_yaml('configs/instances/small.yaml')
+    instance = generate_instance(cfg, inst_cfg, seed=1)
+    scenario = {"passenger": {"passenger_arrivals": {}}, "power": {"station_loads_kw": {}}}
+    assignment = solve_assignment(build_assignment_data(instance)).to_dict()
+    env = EBusDroneEnv(config=cfg, instance=instance, scenario=scenario, assignment=assignment)
+    for _ in range(80):
+        _, _, done, _, _ = env.step(0)
+        if env.delivered_parcels:
+            break
+        if done:
+            break
+    assert len(env.delivered_parcels) >= 1

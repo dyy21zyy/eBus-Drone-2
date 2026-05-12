@@ -15,5 +15,7 @@ def apply_terminal_penalty_once(state: dict, undelivered: list[dict], t_end: flo
     state["terminal_penalty_applied"] = True
     penalty = 0.0
     for p in undelivered:
-        penalty += eta_l_term * max(0.0, float(t_end) - float(p["deadline"])) + eta_u_term
+        if p.get("status") == "delivered":
+            continue
+        penalty += eta_l_term * max(0.0, float(t_end) - float(p.get("deadline_min", p.get("deadline", t_end)))) + eta_u_term
     return penalty
