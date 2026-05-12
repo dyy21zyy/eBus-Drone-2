@@ -46,6 +46,7 @@ class EBusDroneEnv:
         self.parcel_states = {}
         self.bus_states = {0: {"trip_id": 0, "onboard_parcel_ids": [], "onboard_parcel_weight": 0.0}}
         self.station_states = {}
+        self.delivered_parcels = set()
         self.calendar = EventCalendar()
 
     def _reset_from_data(self):
@@ -105,10 +106,26 @@ class EBusDroneEnv:
         locker_over = 0.0
         if station_state is not None and station_state["locker_inventory_kg"] > station_state["locker_capacity_kg"]:
             locker_over = station_state["locker_inventory_kg"] - station_state["locker_capacity_kg"]
-        components = {"D_P": dwell.passenger_delay, "D_L": 0.0, "D_E": executed_duration, "D_Pwr": op["power"]["overload"], "D_B": 0.0, "D_K": locker_over}
-        if terminated: components["D_L"] += apply_terminal_penalty_once({"terminal_penalty_applied": self.terminal_penalty_applied}, [], self.state["horizon"], 1.0, 1.0)
-        reward, rc = compute_reward(components, {"alpha_1": 0.01, "alpha_2": 1.0, "alpha_3": 0.001, "alpha_4": 1.0, "alpha_5": 1.0, "alpha_6": 1.0})
-        return self._build_obs_for_current_event(), float(reward), terminated, False, {"executed_action_index": executed_action_index, "action_repaired": executed_action_index != action_index, "termination_reason": reason, "reward_components": rc, "unloaded_parcels": unloaded_ids, "unloading_volume_kg": q_f, "current_trip_id": trip_id, "current_station_id": station_id}
+        transition_minutes = max(0.0, dwell.t_s + self.state["travel_time"])
+        bus_energy_kwh = 20.0 * executed_duration / 3600.0
+        drone_energy_kwh = max(0.0, float(op.get("P_D", 0.0))) * transition_minutes / 60.0
+        d_l = 0.0
+        for pid in list(self.delivered_parcels):
+            if pid in self.delivered_parcels:
+                pr = self.parcel_states.get(pid, {})
+                c_i = float(pr.get("delivery_completion_time", self.state["time"]))
+                d_i = float(pr.get("deadline_min", self.state["horizon"]))
+                d_l += max(0.0, c_i - d_i)
+        d_b = max(0.0, 5.0 - float(self.state.get("battery", 0.0)))
+        components = {"D_P": dwell.passenger_delay, "D_L": d_l, "D_E": (bus_energy_kwh + drone_energy_kwh), "D_Pwr": float(op["power"].get("overload", 0.0))*transition_minutes, "D_B": d_b, "D_K": locker_over*transition_minutes}
+        terminal_penalty = 0.0
+        if terminated:
+            undelivered = [p for p in self.parcel_states.values() if p.get("status") != "delivered"]
+            terminal_penalty = apply_terminal_penalty_once(self.__dict__, undelivered, self.state["time"], 1.0, 1.0)
+            components["D_L"] += terminal_penalty
+        reward, rc = compute_reward(components, {"alpha_1": 0.01, "alpha_2": 1.0, "alpha_3": 1.0, "alpha_4": 1.0, "alpha_5": 1.0, "alpha_6": 1.0})
+        rc.update({"terminal_penalty": terminal_penalty, "total_cost": -reward, "reward": reward})
+        return self._build_obs_for_current_event(), float(reward), terminated, False, {"executed_action_index": executed_action_index, "selected_duration": selected_duration, "executed_duration": executed_duration, "action_repaired": executed_action_index != action_index, "termination_reason": reason, "reward_components": rc, "unloaded_parcels": unloaded_ids, "unloading_volume_kg": q_f, "current_trip_id": trip_id, "current_station_id": station_id}
 
     def _next_decision_event(self):
         while len(self.calendar) > 0:
