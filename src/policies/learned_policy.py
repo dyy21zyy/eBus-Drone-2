@@ -1,4 +1,12 @@
-"""Module scaffold for ebus_drone_rl."""
+from __future__ import annotations
 
-def smoke() -> str:
-    return __name__
+
+class LearnedPolicy:
+    def __init__(self, agent):
+        self.agent = agent
+
+    def select_action(self, observation, action_mask, info=None) -> int:
+        return int(self.agent.select_action(observation, action_mask, info))
+
+    def act(self, observation, action_mask) -> int:
+        return self.select_action(observation, action_mask)
