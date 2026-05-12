@@ -11,6 +11,8 @@ from .event_types import Event
 from .parcel_process import unload_parcels
 from .passenger_process import simulate_passenger_stop
 from .reward import compute_reward
+from src.low_level.station_operator import operate_station_step
+from .termination import apply_terminal_penalty_once
 from .state_builder import build_observation
 from .termination import check_termination
 from .transition import advance_time
@@ -38,6 +40,7 @@ class EBusDroneEnv:
             "locker": 0,
             "idle_drones": 2,
             "full_batteries": 3,
+            "empty_batteries": 0,
             "station_power": 500.0,
             "power_margin": 100.0,
             "available_chargers": 1,
@@ -100,12 +103,31 @@ class EBusDroneEnv:
         self.current_event = self._next_decision_event()
         has_future = self.current_event is not None
         terminated, reason = check_termination(self.state, has_future)
-        penalty = 0.0
-        if terminated and not self.terminal_penalty_applied and self.state["onboard_parcels"] > 0:
-            penalty = float(self.state["onboard_parcels"])
-            self.terminal_penalty_applied = True
-        reward = compute_reward(dwell.passenger_delay, executed_duration, penalty)
+        station = {
+            "drones": [{"id": "d1", "status": "idle"}, {"id": "d2", "status": "idle"}],
+            "locker_parcels": [],
+            "full_batteries": self.state["full_batteries"],
+            "empty_batteries": self.state["empty_batteries"],
+            "G_max": 2,
+            "P_capacity": self.state["station_power"],
+            "P_bat": 10.0,
+        }
+        op = operate_station_step(station, self.state["time"], p_e=50.0, p_l=20.0)
+        self.state["full_batteries"] = station["full_batteries"]
+        self.state["empty_batteries"] = station["empty_batteries"]
+
+        components = {"D_P": dwell.passenger_delay, "D_L": 0.0, "D_E": executed_duration, "D_Pwr": op["power"]["overload"], "D_B": 0.0, "D_K": 0.0}
+        terminal_penalty = 0.0
+        if terminated:
+            undelivered = [{"deadline": self.state["time"] - 1.0}] * int(self.state["onboard_parcels"])
+            st = {"terminal_penalty_applied": self.terminal_penalty_applied}
+            terminal_penalty = apply_terminal_penalty_once(st, undelivered, self.state["horizon"], 1.0, 1.0)
+            self.terminal_penalty_applied = st["terminal_penalty_applied"]
+            components["D_L"] += terminal_penalty
+        reward, reward_components = compute_reward(components, {"alpha_1": 0.01, "alpha_2": 1.0, "alpha_3": 0.001, "alpha_4": 1.0, "alpha_5": 1.0, "alpha_6": 1.0})
         info["termination_reason"] = reason
+        info["reward_components"] = reward_components
+        info["terminal_penalty"] = terminal_penalty
         next_obs = self._build_obs_for_current_event()
         return next_obs, float(reward), terminated, False, info
 
