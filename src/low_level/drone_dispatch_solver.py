@@ -14,5 +14,5 @@ def solve_greedy_dispatch(idle_drone_ids: list[str], full_batteries: int, feasib
     chosen = ranked[:n_disp]
     assignments = []
     for drone_id, parcel in zip(idle_drone_ids[:n_disp], chosen):
-        assignments.append({"drone_id": drone_id, "parcel": parcel})
+        assignments.append({"drone_id": drone_id, "parcel_id": int(parcel["id"]), "parcel": parcel})
     return assignments, n_disp

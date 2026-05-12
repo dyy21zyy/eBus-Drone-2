@@ -60,13 +60,14 @@ class EBusDroneEnv:
         self.parcel_states = {}
         weights = {int(c["customer_id"]): float(c["parcel_weight_kg"]) for c in self.instance["customers"]}
         for cid, t_id in self.assignment_index["by_customer"].items():
-            self.parcel_states[cid] = {"parcel_id": cid, "weight_kg": weights[cid], "status": "onboard", "current_trip_id": int(t_id), "assigned_trip_id": int(t_id), "assigned_station_id": int(self.assignment_index["station_by_customer"][cid]), "release_time": None, "pickup_time": None, "delivery_completion_time": None, "lateness": None, "station_id": None}
+            self.parcel_states[cid] = {"parcel_id": cid, "id": cid, "customer_id": cid, "weight_kg": weights[cid], "status": "onboard", "current_trip_id": int(t_id), "assigned_trip_id": int(t_id), "assigned_station_id": int(self.assignment_index["station_by_customer"][cid]), "deadline_min": float(self.instance.get("horizon_minutes", 300.0)), "release_time": None, "pickup_time": None, "delivery_completion_time": None, "drone_return_time": None, "lateness": None, "drone_id": None, "station_id": None, "T_out": 5.0, "T_rt": 10.0, "c_D": 1.0}
 
-        self.station_states = {int(s["station_id"]): {"station_id": int(s["station_id"]), "locker_parcels": [], "locker_inventory_kg": 0.0, "locker_capacity_kg": float(s["locker_capacity_kg"])} for s in self.instance["stations"]["stations"]}
+        self.station_states = {int(s["station_id"]): {"station_id": int(s["station_id"]), "locker_parcels": [], "locker_inventory_kg": 0.0, "locker_capacity_kg": float(s["locker_capacity_kg"]), "drones": [{"drone_id": f"s{int(s["station_id"])}_d{j}", "status": "idle", "assigned_parcel_id": None, "return_time": None, "home_station_id": int(s["station_id"])} for j in range(int(s["drones"]))], "full_batteries": int(s["initial_fully_charged_batteries"]), "depleted_batteries": int(s["initial_depleted_batteries"]), "empty_batteries": int(s["initial_depleted_batteries"]), "charging_batteries": [], "charging_slots": int(s["chargers"]), "G_max": int(s["chargers"]), "P_capacity": float(s["station_power_capacity_kw"]), "station_power_capacity_kw": float(s["station_power_capacity_kw"]), "current_base_load_kw": 50.0, "current_bus_charging_load_kw": 20.0, "current_drone_charging_load_kw": 0.0, "P_bat": 10.0, "battery_charge_duration_min": 10.0, "max_round_trip_duration": 120.0} for s in self.instance["stations"]["stations"]}
         self.state = {"time": 0.0, "horizon": horizon, "battery": battery_max, "battery_max": battery_max, "charge_rate": charge_rate, "travel_consumption": float(self.instance["bus"]["energy_kwh_per_km"]), "travel_time": 5.0, "trip_location": 0, "onboard_passengers": 0, "onboard_parcels": len(onboard), "queue": 0, "locker": 0, "idle_drones": int(station0["drones"]), "full_batteries": int(station0["initial_fully_charged_batteries"]), "empty_batteries": int(station0["initial_depleted_batteries"]), "station_power": float(station0["station_power_capacity_kw"]), "power_margin": 100.0, "available_chargers": int(station0["chargers"]), "total_chargers": int(station0["chargers"]), "parcel_urgency": 0.0, "infeasible": False, "trip_id": trip_id}
         self.bus_states = {int(t["trip_id"]): {"trip_id": int(t["trip_id"]), "current_stop_index": 0, "next_event_time": float(t["departure_min"]), "battery": battery_max, "onboard_passenger_load": 0, "onboard_parcel_ids": [int(d["customer_id"]) for d in decisions if int(d["trip_id"]) == int(t["trip_id"])], "onboard_parcel_weight": 0.0, "active": True} for t in self.instance["network"]["scheduled_bus_trips"]}
         for t_id, trip_state in self.bus_states.items():
             trip_state["onboard_parcel_weight"] = float(sum(self.parcel_states[pid]["weight_kg"] for pid in trip_state["onboard_parcel_ids"]))
+        self.delivered_parcels = set()
         self.calendar = EventCalendar(); self.calendar.build_from_generated(self.instance, self.scenario, self.assignment)
 
     def get_action_mask(self) -> np.ndarray:
@@ -92,7 +93,15 @@ class EBusDroneEnv:
         dwell = compute_dwell_breakdown(0, pax["initial_board"], 1.0, 1.0, q_f, executed_duration, 0.5, 0.5, 1.0, self.state["onboard_passengers"], pax_required)
         self.state["time"] = advance_time(self.current_event.time if self.current_event else self.state["time"], dwell.t_s, self.state["travel_time"]); self.state["battery"] = apply_travel_consumption(self.state["battery"], self.state["travel_consumption"]); self.state["available_chargers"] = release_charger(self.state["available_chargers"], self.state["total_chargers"])
         self.current_event = self._next_decision_event(); terminated, reason = check_termination(self.state, self.current_event is not None)
-        station = {"drones": [{"id": "d1", "status": "idle"}], "locker_parcels": [], "full_batteries": self.state["full_batteries"], "empty_batteries": self.state["empty_batteries"], "G_max": 1, "P_capacity": self.state["station_power"], "P_bat": 10.0}; op = operate_station_step(station, self.state["time"], p_e=50.0, p_l=20.0)
+        op = {"power": {"overload": 0.0}}
+        for sid, st in self.station_states.items():
+            station_op = operate_station_step(st, self.state["time"], parcel_states=self.parcel_states, delivered_parcels=self.delivered_parcels, p_e=st.get("current_base_load_kw", 50.0), p_l=st.get("current_bus_charging_load_kw", 20.0), new_parcels=bool(unloaded_ids and station_state is not None and sid == int(station_state["station_id"])), max_round_trip_duration=st.get("max_round_trip_duration", 120.0))
+            st["current_drone_charging_load_kw"] = station_op["P_D"]
+            if station_state is not None and sid == int(station_state["station_id"]):
+                op = station_op
+                self.state["full_batteries"] = int(st.get("full_batteries", self.state["full_batteries"]))
+                self.state["empty_batteries"] = int(st.get("depleted_batteries", self.state["empty_batteries"]))
+                self.state["idle_drones"] = sum(1 for d in st.get("drones", []) if d.get("status") == "idle")
         locker_over = 0.0
         if station_state is not None and station_state["locker_inventory_kg"] > station_state["locker_capacity_kg"]:
             locker_over = station_state["locker_inventory_kg"] - station_state["locker_capacity_kg"]
