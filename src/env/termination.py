@@ -4,6 +4,8 @@ from __future__ import annotations
 def check_termination(state: dict, has_future_decision: bool) -> tuple[bool, str | None]:
     if state.get("time", 0.0) >= state.get("horizon", float("inf")):
         return True, "horizon_reached"
+    if state.get("battery",1.0) <= 0:
+        return True, "battery_depleted"
     if not has_future_decision:
         return True, "no_future_decision"
     return False, None
