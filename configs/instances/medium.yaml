@@ -1,0 +1,5 @@
+name: medium
+num_customers: 60
+num_integrated_stations: 8
+num_scheduled_bus_trips: 36
+planned_headway_min: 10

@@ -1,0 +1,5 @@
+name: small
+num_customers: 30
+num_integrated_stations: 6
+num_scheduled_bus_trips: 24
+planned_headway_min: 15

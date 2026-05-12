@@ -1,0 +1,5 @@
+name: large
+num_customers: 90
+num_integrated_stations: 8
+num_scheduled_bus_trips: 45
+planned_headway_min: 8
