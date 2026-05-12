@@ -1,4 +1,7 @@
-"""Module scaffold for ebus_drone_rl."""
+from __future__ import annotations
 
-def smoke() -> str:
-    return __name__
+from .ebus_drone_env import EBusDroneEnv
+
+
+def make_env() -> EBusDroneEnv:
+    return EBusDroneEnv()
