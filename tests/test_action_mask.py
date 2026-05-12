@@ -1,6 +1,11 @@
 import numpy as np
 
 from src.env.action_space import feasible_action_mask, repair_action
+from src.data_generation.scenario_generator import generate_instance
+from src.offline.assignment_data_builder import build_assignment_data
+from src.offline.assignment_solver import solve_assignment
+from src.env.ebus_drone_env import EBusDroneEnv
+from src.utils.config import load_yaml
 
 
 def test_no_charger_only_zero_feasible():
@@ -25,3 +30,14 @@ def test_infeasible_repaired_to_feasible():
     repaired = repair_action(8, mask)
     assert mask[repaired] == 1
     assert repaired <= 8
+
+
+def test_parcel_only_stop_is_decision_epoch():
+    cfg = load_yaml('configs/default.yaml')
+    inst_cfg = load_yaml('configs/instances/small.yaml')
+    instance = generate_instance(cfg, inst_cfg, seed=1)
+    scenario = {"passenger": {"passenger_arrivals": {}}, "power": {"station_loads_kw": {}}}
+    assignment = solve_assignment(build_assignment_data(instance)).to_dict()
+    env = EBusDroneEnv(config=cfg, instance=instance, scenario=scenario, assignment=assignment)
+    assert env.current_event is not None
+    assert env.current_event.parcel_required is True

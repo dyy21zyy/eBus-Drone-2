@@ -3,6 +3,7 @@ from pathlib import Path
 
 from src.offline.assignment_data_builder import build_assignment_data
 from src.offline.assignment_io import read_assignment, write_assignment
+from src.offline.assignment_io import build_assignment_indices
 from src.offline.assignment_solver import solve_assignment
 
 
@@ -48,3 +49,12 @@ def test_offline_assignment_constraints_and_io(tmp_path):
     loaded = read_assignment(str(out))
     assert loaded.total_cost == result.total_cost
     assert len(loaded.decisions) == len(result.decisions)
+
+
+def test_build_assignment_indices_roundtrip():
+    instance = _load_instance()
+    data = build_assignment_data(instance)
+    result = solve_assignment(data).to_dict()
+    idx = build_assignment_indices(result)
+    assert idx["by_trip_station"]
+    assert len(idx["by_customer"]) == len(data.customers)

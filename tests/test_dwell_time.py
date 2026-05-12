@@ -6,3 +6,9 @@ def test_dwell_max_logic_and_delay_nonnegative():
     assert b.t_s >= b.t_p
     assert b.t_s == b.t_s_hat + 2
     assert b.passenger_delay >= 0
+
+
+def test_parcel_only_stop_delta_equals_service_time():
+    b = compute_dwell_breakdown(0, 0, 1, 2, 5, 0, 1, 1, 1, 0, False)
+    assert b.t_f > 0
+    assert b.delta_s == b.t_s
