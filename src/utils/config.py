@@ -1,5 +1,16 @@
 from __future__ import annotations
 from pathlib import Path
+import ast
+
+
+def _parse_scalar(val: str):
+    low = val.lower()
+    if low in {"true", "false"}:
+        return low == "true"
+    try:
+        return ast.literal_eval(val)
+    except Exception:
+        return val
 
 
 def _simple_yaml_parse(text: str) -> dict:
@@ -19,10 +30,7 @@ def _simple_yaml_parse(text: str) -> dict:
             cur[key] = {}
             stack.append((indent + 2, cur[key]))
         else:
-            if val.isdigit():
-                cur[key] = int(val)
-            else:
-                cur[key] = val
+            cur[key] = _parse_scalar(val)
     return data
 
 

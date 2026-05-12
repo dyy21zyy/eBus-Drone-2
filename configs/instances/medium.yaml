@@ -1,2 +1,5 @@
 name: medium
-num_stations: 30
+num_customers: 60
+station_ids: [1, 5, 9, 13, 17, 21, 25, 29]
+num_scheduled_bus_trips: 36
+planned_headway_min: 10

@@ -1,2 +1,5 @@
 name: large
-num_stations: 60
+num_customers: 90
+station_ids: [1, 5, 9, 13, 17, 21, 25, 29]
+num_scheduled_bus_trips: 45
+planned_headway_min: 8
