@@ -1,4 +1,5 @@
-"""Module scaffold for ebus_drone_rl."""
+from __future__ import annotations
 
-def smoke() -> str:
-    return __name__
+
+def advance_time(current_time: float, dwell: float, travel_time: float) -> float:
+    return current_time + max(dwell, 0.0) + max(travel_time, 0.0)
