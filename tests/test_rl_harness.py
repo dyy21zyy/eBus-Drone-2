@@ -25,10 +25,10 @@ def test_replay_buffer_stores_masks():
 
 
 def test_smoke_train_and_benchmark(tmp_path):
-    env = EBusDroneEnv()
+    env = EBusDroneEnv(smoke_test=True)
     agent = train_agent(env, method="proposed", episodes=1, max_steps=2)
     assert len(agent.buffer) > 0
     out = tmp_path / "bench.json"
-    res = run_benchmark(["no_charging", "proposed"], str(out))
+    res = run_benchmark(["no_charging", "proposed"], str(out), smoke_test=True)
     assert "proposed" in res
     assert out.exists()
