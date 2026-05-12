@@ -2,6 +2,7 @@ from src.data_generation.scenario_generator import generate_instance
 from src.offline.assignment_data_builder import build_assignment_data
 from src.offline.assignment_solver import solve_assignment
 from src.env.ebus_drone_env import EBusDroneEnv
+from src.offline.assignment_io import build_assignment_indices
 from src.utils.config import load_yaml
 
 
@@ -39,3 +40,52 @@ def test_cli_eval_loads_real_data_path(monkeypatch):
     sys.argv = ["prog", "--mode", "eval", "--config", "configs/default.yaml", "--instance", "small", "--method", "no_charging", "--seed", "1", "--smoke-test"]
     main_mod.main()
     assert called["value"] is True
+
+
+def test_assignment_driven_unloading_chain():
+    cfg = load_yaml('configs/default.yaml')
+    inst_cfg = load_yaml('configs/instances/small.yaml')
+    instance = generate_instance(cfg, inst_cfg, seed=1)
+    scenario = {"passenger": {"passenger_arrivals": {}}, "power": {"station_loads_kw": {}}}
+    assignment = solve_assignment(build_assignment_data(instance)).to_dict()
+    env = EBusDroneEnv(config=cfg, instance=instance, scenario=scenario, assignment=assignment)
+    idx = build_assignment_indices(assignment)
+    (trip_id, station_id), expected = next(((k, v) for k, v in idx["by_trip_station"].items() if v), ((None, None), []))
+    assert expected
+    done = False
+    hit = None
+    while not done:
+        _, _, done, _, info = env.step(0)
+        if info["current_trip_id"] == trip_id and info["current_station_id"] == station_id:
+            hit = info
+            break
+    assert hit is not None
+    assert sorted(hit["unloaded_parcels"]) == sorted(expected)
+    expected_q = sum(env.parcel_states[pid]["weight_kg"] for pid in expected)
+    assert hit["unloading_volume_kg"] == expected_q
+    for pid in expected:
+        assert pid not in env.bus_states[trip_id]["onboard_parcel_ids"]
+        assert pid in env.station_states[station_id]["locker_parcels"]
+
+
+def test_parcel_unloading_validation_errors():
+    from src.env.parcel_process import unload_parcels_to_locker
+    trip = {"trip_id": 1, "onboard_parcel_ids": [10], "onboard_parcel_weight": 1.0}
+    station = {"station_id": 2, "locker_parcels": [], "locker_inventory_kg": 0.0}
+    parcels = {10: {"weight_kg": 1.0, "status": "onboard", "assigned_trip_id": 1, "assigned_station_id": 2}}
+    unload_parcels_to_locker(trip, station, parcels, [10], 0.0)
+    import pytest
+    with pytest.raises(ValueError):
+        unload_parcels_to_locker(trip, station, parcels, [10], 1.0)
+
+
+def test_wrong_trip_station_rejected():
+    from src.env.parcel_process import get_unloading_parcels
+    import pytest
+    idx_wrong_trip = {"by_trip_station": {(2, 2): [10]}}
+    idx_wrong_station = {"by_trip_station": {(1, 3): [10]}}
+    parcels = {10: {"status": "onboard", "assigned_trip_id": 1, "assigned_station_id": 2, "weight_kg": 1.0}}
+    with pytest.raises(ValueError):
+        get_unloading_parcels(2, 2, idx_wrong_trip, parcels)
+    with pytest.raises(ValueError):
+        get_unloading_parcels(1, 3, idx_wrong_station, parcels)
