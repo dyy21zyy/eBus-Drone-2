@@ -1,4 +1,8 @@
-"""Module scaffold for ebus_drone_rl."""
+from dataclasses import dataclass
 
-def smoke() -> str:
-    return __name__
+
+@dataclass(frozen=True)
+class Parcel:
+    customer_id: int
+    weight_kg: float
+    deadline_min: float
