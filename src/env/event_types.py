@@ -12,3 +12,5 @@ class Event:
     integrated: bool
     requires_stop: bool
     is_decision: bool
+    passengers_required: bool = False
+    parcel_required: bool = False
