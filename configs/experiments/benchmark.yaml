@@ -1,1 +1,15 @@
 name: benchmark
+methods:
+  - no_charging
+  - uniform_15
+  - uniform_30
+  - uniform_45
+  - uniform_60
+  - uniform_120
+  - max_feasible
+  - dwell_greedy
+  - battery_threshold
+  - dqn_dr
+  - ddqn_dr
+  - am_ddqn_dr
+  - proposed

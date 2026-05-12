@@ -6,6 +6,6 @@ from .base_policy import BasePolicy
 
 
 class NoChargingPolicy(BasePolicy):
-    def act(self, observation: np.ndarray, action_mask: np.ndarray) -> int:
-        _ = observation, action_mask
+    def select_action(self, observation: np.ndarray, action_mask: np.ndarray, info=None) -> int:
+        _ = observation, action_mask, info
         return 0

@@ -6,7 +6,7 @@ from .base_policy import BasePolicy
 
 
 class MaxFeasiblePolicy(BasePolicy):
-    def act(self, observation: np.ndarray, action_mask: np.ndarray) -> int:
-        _ = observation
+    def select_action(self, observation: np.ndarray, action_mask: np.ndarray, info=None) -> int:
+        _ = observation, info
         feasible = [i for i, v in enumerate(action_mask.tolist()) if v == 1]
         return max(feasible) if feasible else 0
