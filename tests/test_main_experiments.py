@@ -23,7 +23,7 @@ def test_old_generate_offline_eval_commands_still_work(tmp_path, monkeypatch):
 def test_pipeline_smoke_creates_nonempty_results(tmp_path, monkeypatch):
     out = tmp_path / 'o'
     _run(['--mode', 'pipeline', '--config', 'configs/default.yaml', '--instance', 'small', '--seeds', '1', '--methods', 'uniform_30', 'battery_threshold', '--smoke', '--output-dir', str(out)], monkeypatch)
-    p = out / 'results' / 'benchmark' / 'small' / 'summary.csv'
+    p = out / 'smoke' / 'results' / 'benchmark' / 'small' / 'summary.csv'
     assert p.exists() and p.read_text().strip()
 
 
@@ -46,6 +46,26 @@ def test_unknown_method_fails(monkeypatch):
     monkeypatch.setattr('sys.argv', ['prog', '--mode', 'eval', '--config', 'configs/default.yaml', '--method', 'bad'])
     with pytest.raises(ValueError, match='Unknown method'):
         main()
+
+
+def test_all_required_methods_accepted_by_cli(tmp_path, monkeypatch):
+    out = tmp_path / 'o'
+    methods = ['uniform_15', 'uniform_30', 'uniform_45', 'uniform_60', 'uniform_120', 'dwell_greedy', 'battery_threshold', 'dqn_dr', 'ddqn_dr', 'am_ddqn_dr', 'am_dueling_ddqn_dr']
+    _run(['--mode', 'generate', '--config', 'configs/default.yaml', '--instance', 'small', '--seed', '1', '--output-dir', str(out)], monkeypatch)
+    _run(['--mode', 'offline', '--config', 'configs/default.yaml', '--instance', 'small', '--seed', '1', '--output-dir', str(out)], monkeypatch)
+    _run(['--mode', 'eval', '--config', 'configs/default.yaml', '--instance', 'small', '--method', methods[0], '--seed', '1', '--output-dir', str(out), '--smoke'], monkeypatch)
+
+
+def test_formal_benchmark_rejects_max_steps_without_override(tmp_path, monkeypatch):
+    out = tmp_path / 'o'
+    with pytest.raises(ValueError, match='Formal experiments require full horizon'):
+        _run(['--mode', 'benchmark', '--config', 'configs/default.yaml', '--instance', 'small', '--methods', 'uniform_30', '--seeds', '1', '--max-steps', '5', '--output-dir', str(out)], monkeypatch)
+
+
+def test_smoke_pipeline_writes_under_smoke_directory(tmp_path, monkeypatch):
+    out = tmp_path / 'o'
+    _run(['--mode', 'pipeline', '--config', 'configs/default.yaml', '--instance', 'small', '--seeds', '1', '--methods', 'uniform_30', '--smoke', '--output-dir', str(out)], monkeypatch)
+    assert (out / 'smoke' / 'results' / 'benchmark' / 'small' / 'summary.csv').exists()
 
 
 def test_missing_checkpoint_fails_unless_train_if_missing(tmp_path):

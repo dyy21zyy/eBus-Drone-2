@@ -1,7 +1,7 @@
 import pytest
 from src.env.ebus_drone_env import EBusDroneEnv
 from src.harness.trainer import train_agent
-from src.harness.benchmark_runner import build_policy, run_benchmark, normalize_method_name
+from src.harness.benchmark_runner import build_policy, run_benchmark, normalize_method_name, uniform_seconds_from_method
 from src.harness.sensitivity_runner import run_sensitivity
 from src.harness.evaluator import save_eval_metrics, evaluate_policy
 from src.policies.dwell_greedy_policy import DwellGreedyPolicy
@@ -27,6 +27,15 @@ def test_benchmark_generates_summary_csv(tmp_path):
 
 def test_method_name_normalization():
     assert normalize_method_name('dwell_based_greedy') == 'dwell_greedy'
+    assert normalize_method_name('proposed') == 'am_dueling_ddqn_dr'
+
+
+def test_uniform_method_parsing_supports_paper_durations():
+    assert uniform_seconds_from_method('uniform_15') == 15
+    assert uniform_seconds_from_method('uniform_30') == 30
+    assert uniform_seconds_from_method('uniform_45') == 45
+    assert uniform_seconds_from_method('uniform_60') == 60
+    assert uniform_seconds_from_method('uniform_120') == 120
 
 
 def test_build_policy_supports_all_learning_ablation_methods(tmp_path):
@@ -46,6 +55,14 @@ def test_max_steps_explicit_truncates():
     env = EBusDroneEnv(smoke_test=True)
     metrics = evaluate_policy(env, DwellGreedyPolicy(), episodes=1, max_steps=3)
     assert metrics['steps'] <= 3
+    assert metrics['max_steps'] == 3
+    assert metrics['full_horizon_completed'] is False
+
+
+def test_full_horizon_only_true_when_operating_horizon_reached():
+    env = EBusDroneEnv(smoke_test=True)
+    metrics = evaluate_policy(env, DwellGreedyPolicy(), episodes=1, max_steps=None)
+    assert metrics['full_horizon_completed'] == (metrics['termination_reason'] == 'horizon_reached')
 
 
 def test_sensitivity_changes_factor(tmp_path):
