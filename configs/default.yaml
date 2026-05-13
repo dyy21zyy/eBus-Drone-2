@@ -70,3 +70,22 @@ power:
   nominal_base_load_min_kw: 50.0
   nominal_base_load_max_kw: 150.0
   disturbance_std_kw: 8.0
+rl:
+  episodes: 20
+  max_steps_per_episode: 100
+  gamma: 0.99
+  learning_rate: 0.001
+  batch_size: 32
+  replay_buffer_size: 5000
+  warmup_steps: 20
+  epsilon_start: 1.0
+  epsilon_end: 0.05
+  epsilon_decay_steps: 500
+  target_update_type: hard
+  target_update_interval: 25
+  polyak_tau: 0.005
+  hidden_layers: [128, 128]
+  gradient_clip_norm: 10.0
+  seed: 1
+  deterministic: false
+  device: auto
