@@ -29,6 +29,13 @@ def test_method_name_normalization():
     assert normalize_method_name('dwell_based_greedy') == 'dwell_greedy'
 
 
+def test_build_policy_supports_all_learning_ablation_methods(tmp_path):
+    env = EBusDroneEnv(smoke_test=True)
+    for method in ["dqn_dr", "ddqn_dr", "am_ddqn_dr", "am_dueling_ddqn_dr"]:
+        policy = build_policy(method, env, out_root=str(tmp_path), train_if_missing=True, smoke_test=True, seed=7, instance_name="small")
+        assert policy is not None
+
+
 def test_evaluation_full_horizon_default_not_50():
     env = EBusDroneEnv(smoke_test=True)
     metrics = evaluate_policy(env, DwellGreedyPolicy(), episodes=1, max_steps=None)

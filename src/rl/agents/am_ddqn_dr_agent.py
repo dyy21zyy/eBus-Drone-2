@@ -8,6 +8,10 @@ from src.rl.agents.ddqn_dr_agent import DDQNDRAgent
 
 
 class AMDDQNDRAgent(DDQNDRAgent):
+    def __init__(self, obs_dim: int, action_dim: int, cfg: dict):
+        super().__init__(obs_dim, action_dim, cfg)
+        self.use_action_mask = True
+
     def _feasible(self, mask):
         feasible = [i for i, v in enumerate(mask) if v > 0]
         if not feasible:
