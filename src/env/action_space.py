@@ -13,16 +13,22 @@ def action_index_to_duration(action_index: int) -> int:
     return A_FULL[action_index]
 
 
-def feasible_action_mask(available_chargers: int, battery: float, battery_max: float, charge_rate: float) -> np.ndarray:
+def max_charge_duration_sec(current_battery_kwh: float, capacity_kwh: float, power_kw: float, eta: float, u_max_sec: float) -> float:
+    if power_kw <= 0 or eta <= 0:
+        return 0.0
+    remaining_kwh = max(0.0, capacity_kwh - current_battery_kwh)
+    return min(max(0.0, 3600.0 * remaining_kwh / (eta * power_kw)), max(0.0, u_max_sec))
+
+
+def feasible_action_mask(available_chargers: int, current_battery_kwh: float, capacity_kwh: float, power_kw: float, eta: float, atol: float = 1e-9) -> np.ndarray:
     mask = np.zeros(len(A_FULL), dtype=np.int8)
-    if available_chargers <= 0:
-        mask[0] = 1
-        return mask
-    max_duration = max(0.0, (battery_max - battery) / max(charge_rate, 1e-9))
-    for i, u in enumerate(A_FULL):
-        if u <= max_duration + 1e-9:
-            mask[i] = 1
     mask[0] = 1
+    if available_chargers <= 0:
+        return mask
+    max_feasible_duration_sec = max_charge_duration_sec(current_battery_kwh, capacity_kwh, power_kw, eta, max(A_FULL))
+    for i, u_sec in enumerate(A_FULL):
+        if u_sec <= max_feasible_duration_sec + atol:
+            mask[i] = 1
     return mask
 
 
