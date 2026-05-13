@@ -73,7 +73,7 @@ class EBusDroneEnv:
             sid = int(s["station_id"])
             n_ch = int(s["chargers"])
             station_load_profile = self.scenario.get("power", {}).get("station_base_load_kw", {}).get(str(sid), self.scenario.get("power", {}).get("station_base_load_kw", {}).get(sid, []))
-            self.station_states[sid] = {"station_id": sid, "charger_release_times_min": [0.0] * n_ch, "locker_parcels": [], "locker_parcel_ids": [], "locker_inventory_kg": 0.0, "locker_capacity_kg": float(s["locker_capacity_kg"]), "idle_drone_ids": [f"s{sid}_d{j}" for j in range(int(s["drones"]))], "active_drone_missions": [], "full_batteries": int(s["initial_fully_charged_batteries"]), "depleted_batteries": int(s["initial_depleted_batteries"]), "batteries_charging": [], "charging_batteries": [], "current_bus_charging_load": 0.0, "current_drone_battery_charging_load": 0.0, "power_capacity_kw": float(s["station_power_capacity_kw"]), "charging_slots": n_ch, "G_max": int(self.instance.get("battery", {}).get("max_simultaneous_charging", n_ch)), "P_capacity": float(s["station_power_capacity_kw"]), "P_bat": float(self.instance.get("battery", {}).get("charge_power_kw", 2.0)), "P_chg": float(self.instance["charging"]["pantograph_power_kw"]), "drones": [{"drone_id": f"s{sid}_d{j}", "status": "idle"} for j in range(int(s["drones"]))], "battery_charge_duration_min": float(self.instance.get("battery", {}).get("charge_duration_min", 10.0)), "battery_capacity_kwh": float(self.instance.get("battery", {}).get("capacity_kwh", 0.0)), "dispatch_interval_min": float(self.config.get("drone", {}).get("dispatch_interval_min", 5.0)), "max_round_trip_duration_min": float(self.config.get("drone", {}).get("max_round_trip_duration_min", 1e9)), "base_load_profile_kw": station_load_profile, "base_load_fallback_kw": 50.0}
+            self.station_states[sid] = {"station_id": sid, "charger_release_times_min": [0.0] * n_ch, "bus_charging_intervals": [], "locker_parcels": [], "locker_parcel_ids": [], "locker_inventory_kg": 0.0, "locker_capacity_kg": float(s["locker_capacity_kg"]), "idle_drone_ids": [f"s{sid}_d{j}" for j in range(int(s["drones"]))], "active_drone_missions": [], "full_batteries": int(s["initial_fully_charged_batteries"]), "depleted_batteries": int(s["initial_depleted_batteries"]), "batteries_charging": [], "charging_batteries": [], "current_bus_charging_load": 0.0, "current_drone_battery_charging_load": 0.0, "power_capacity_kw": float(s["station_power_capacity_kw"]), "charging_slots": n_ch, "G_max": int(self.instance.get("battery", {}).get("max_simultaneous_charging", n_ch)), "P_capacity": float(s["station_power_capacity_kw"]), "P_bat": float(self.instance.get("battery", {}).get("charge_power_kw", 2.0)), "P_chg": float(self.instance["charging"]["pantograph_power_kw"]), "drones": [{"drone_id": f"s{sid}_d{j}", "status": "idle"} for j in range(int(s["drones"]))], "battery_charge_duration_min": float(self.instance.get("battery", {}).get("charge_duration_min", 10.0)), "battery_capacity_kwh": float(self.instance.get("battery", {}).get("capacity_kwh", 0.0)), "dispatch_interval_min": float(self.config.get("drone", {}).get("dispatch_interval_min", 5.0)), "max_round_trip_duration_min": float(self.config.get("drone", {}).get("max_round_trip_duration_min", 1e9)), "base_load_profile_kw": station_load_profile, "base_load_fallback_kw": 50.0}
 
         self.parcel_states = {}
         customers = {int(c["customer_id"]): c for c in self.instance.get("customers", [])}
@@ -106,7 +106,11 @@ class EBusDroneEnv:
     def _available_chargers(self, station_state, now):
         return sum(1 for t in station_state["charger_release_times_min"] if t <= now)
     def _active_bus_chargers(self, station_state, now):
-        return sum(1 for t in station_state["charger_release_times_min"] if t > now)
+        intervals = station_state.get("bus_charging_intervals", [])
+        return sum(1 for it in intervals if float(it.get("start_time_min", 0.0)) <= now < float(it.get("end_time_min", 0.0)))
+    def _active_bus_charging_load_kw(self, station_state, now):
+        intervals = station_state.get("bus_charging_intervals", [])
+        return sum(float(it.get("charging_power_kw", 0.0)) for it in intervals if float(it.get("start_time_min", 0.0)) <= now < float(it.get("end_time_min", 0.0)))
     def _base_load_kw(self, station_state, now):
         prof = station_state.get("base_load_profile_kw", [])
         if prof:
@@ -124,9 +128,15 @@ class EBusDroneEnv:
         while t < end_t - 1e-9:
             t_next = min(end_t, t + slice_min)
             for st in self.station_states.values():
-                p_e = self._active_bus_chargers(st, t) * self.state["charge_power_kw"]
+                p_e = self._active_bus_charging_load_kw(st, t)
                 p_l = self._base_load_kw(st, t)
                 st["current_bus_charging_load"] = p_e
+                active_bus_chargers = self._active_bus_chargers(st, t)
+                dt = max(0.0, t_next - t)
+                st["charger_occupied_time_min"] = float(st.get("charger_occupied_time_min", 0.0)) + active_bus_chargers * dt
+                st["charger_observation_time_min"] = float(st.get("charger_observation_time_min", 0.0)) + max(1, len(st.get("charger_release_times_min", []))) * dt
+                denom = max(1e-9, float(st["charger_observation_time_min"]))
+                st["charger_utilization"] = float(st["charger_occupied_time_min"]) / denom
                 operate_station_step(
                     st,
                     t_next,
@@ -301,8 +311,16 @@ class EBusDroneEnv:
         if dur > 0 and av_before > 0:
             i = next(i for i, t in enumerate(st["charger_release_times_min"]) if t <= self.state["time"])
             st["charger_release_times_min"][i] = self.state["time"] + dur / 60.0
+            st.setdefault("bus_charging_intervals", []).append({
+                "station_id": int(st["station_id"]),
+                "bus_id": int(bus["trip_id"]),
+                "charger_index": int(i),
+                "start_time_min": float(self.state["time"]),
+                "end_time_min": float(st["charger_release_times_min"][i]),
+                "charging_power_kw": float(self.state["charge_power_kw"]),
+            })
             self.calendar.add_charger_release(time=st["charger_release_times_min"][i], station_id=st["station_id"])
-            st["current_bus_charging_load"] = self._active_bus_chargers(st, self.state["time"]) * self.state["charge_power_kw"]
+            st["current_bus_charging_load"] = self._active_bus_charging_load_kw(st, self.state["time"])
         bus["battery_kwh"] = apply_charge(bus["battery_kwh"], dur, self.state["charge_power_kw"], self.state["charge_efficiency"], bus["battery_capacity_kwh"])
 
         unload_ids = get_unloading_parcels(bus["trip_id"], st["station_id"], self.assignment_index, self.parcel_states)
@@ -330,7 +348,7 @@ class EBusDroneEnv:
         else:
             bus["completed"] = True; bus["active"] = False
 
-        p_e = self._active_bus_chargers(st, dep) * self.state["charge_power_kw"]
+        p_e = self._active_bus_charging_load_kw(st, dep)
         p_l = self._base_load_kw(st, dep)
         st["current_bus_charging_load"] = p_e
         op = operate_station_step(st, dep, parcel_states=self.parcel_states, delivered_parcels=self.delivered_parcels, p_e=p_e, p_l=p_l, new_parcels=bool(unloaded), dispatch_interval=float(st.get("dispatch_interval_min", 5.0)), max_round_trip_duration=float(st.get("max_round_trip_duration_min", 1e9)))
