@@ -66,4 +66,16 @@ def operate_station_step(station_state: dict, now: float, *, parcel_states: dict
     station_state["locker_inventory_kg"] = float(sum(float(parcel_states[int(pid)]["weight_kg"]) for pid in station_state.get("locker_parcels", []) if int(pid) in parcel_states and parcel_states[int(pid)].get("status") == "in_locker"))
 
     power = compute_station_power(p_e, p_l, charge["P_D"], station_state.get("P_capacity", 0.0))
-    return {"triggered": trigger, "n_disp": n_disp, "assignments": assignments, "dispatched_parcel_ids": [a["parcel_id"] for a in assignments], "delivered_parcel_ids": delivered_ids, "drone_return_ids": returned, "batteries_charged": charge["completed"], "full_batteries": station_state.get("full_batteries", 0), "depleted_batteries": station_state.get("depleted_batteries", station_state.get("empty_batteries", 0)), "P_D": power["P_D"], "P_tot": power["P_tot"], "overload": power["overload"], "charge": charge, "power": power}
+    station_state["current_drone_battery_charging_load"] = power["P_D"]
+    dt = max(0.0, float(now) - float(station_state.get("last_power_update_time_min", now)))
+    station_state["last_power_update_time_min"] = float(now)
+    overload_kw = float(power["overload"])
+    station_state["bus_charging_energy_kwh"] = float(station_state.get("bus_charging_energy_kwh", 0.0)) + float(p_e) * dt / 60.0
+    station_state["drone_charging_energy_kwh"] = float(station_state.get("drone_charging_energy_kwh", 0.0)) + float(power["P_D"]) * dt / 60.0
+    station_state["total_energy_kwh"] = station_state["bus_charging_energy_kwh"] + station_state["drone_charging_energy_kwh"]
+    station_state["power_overload_amount_kw_min"] = float(station_state.get("power_overload_amount_kw_min", 0.0)) + overload_kw * dt
+    station_state["power_overload_duration_min"] = float(station_state.get("power_overload_duration_min", 0.0)) + (dt if overload_kw > 0 else 0.0)
+    total_chargers = max(1, len(station_state.get("charger_release_times_min", [])))
+    active_chargers = int(round(float(p_e) / max(1e-9, float(station_state.get("P_chg", p_e if p_e > 0 else 1.0)))))
+    station_state["charger_utilization"] = float(active_chargers) / float(total_chargers)
+    return {"triggered": trigger, "n_disp": n_disp, "assignments": assignments, "dispatched_parcel_ids": [a["parcel_id"] for a in assignments], "delivered_parcel_ids": delivered_ids, "drone_return_ids": returned, "batteries_charged": charge["completed"], "full_batteries": station_state.get("full_batteries", 0), "depleted_batteries": station_state.get("depleted_batteries", station_state.get("empty_batteries", 0)), "P_D": power["P_D"], "P_tot": power["P_tot"], "overload": power["overload"], "charge": charge, "power": power, "metrics": {"bus_charging_energy_kwh": station_state["bus_charging_energy_kwh"], "drone_charging_energy_kwh": station_state["drone_charging_energy_kwh"], "total_energy_kwh": station_state["total_energy_kwh"], "power_overload_amount_kw_min": station_state["power_overload_amount_kw_min"], "power_overload_duration_min": station_state["power_overload_duration_min"], "charger_utilization": station_state["charger_utilization"]}}
