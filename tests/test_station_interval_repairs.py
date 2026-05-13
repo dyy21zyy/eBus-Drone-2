@@ -1,5 +1,6 @@
 from src.low_level.station_operator import operate_station_step
 from src.env.ebus_drone_env import EBusDroneEnv
+import pytest
 
 
 def test_dispatch_consumes_one_full_battery():
@@ -43,6 +44,7 @@ def test_station_progress_between_decisions():
 def test_bus_charging_energy_positive_during_interval():
     env=EBusDroneEnv(smoke_test=True)
     st=env.station_states[1]
+    st["bus_charging_intervals"]=[{"station_id":1,"bus_id":0,"charger_index":0,"start_time_min":0.0,"end_time_min":10.0,"charging_power_kw":500.0}]
     st["charger_release_times_min"]= [10.0]
     env._run_station_interval(0.0,5.0)
     assert st.get("bus_charging_energy_kwh",0.0) > 0.0
@@ -61,3 +63,43 @@ def test_overload_and_locker_overflow_accumulate_over_time():
     assert st.get("power_overload_amount_kw_min",0.0) > 0.0
     assert st.get("power_overload_duration_min",0.0) > 0.0
     assert st.get("locker_overflow_amount_kg_min",0.0) > 0.0
+
+
+def test_interval_energy_accounts_charger_side_and_bus_side():
+    env = EBusDroneEnv(smoke_test=True)
+    env.config.setdefault("env", {})["station_update_slice_min"] = 0.5
+    st = env.station_states[1]
+    st["bus_charging_intervals"] = [{
+        "station_id": 1, "bus_id": 0, "charger_index": 0,
+        "start_time_min": 0.0, "end_time_min": 2.0, "charging_power_kw": 500.0,
+    }]
+    st["charger_release_times_min"] = [2.0]
+    st["last_power_update_time_min"] = 0.0
+    st["bus_charging_energy_kwh"] = 0.0
+    env.state["charge_power_kw"] = 500.0
+    env._run_station_interval(0.0, 2.0)
+    assert st.get("bus_charging_energy_kwh", 0.0) == pytest.approx(500.0 * (120.0 / 3600.0), rel=1e-6)
+
+
+def test_step_bus_battery_uses_efficiency_station_uses_charger_energy():
+    from src.env.bus_process import apply_charge
+    before = 100.0
+    after = apply_charge(before, 120.0, 500.0, 0.95, 200.0)
+    expected_bus_gain = 500.0 * (120.0 / 3600.0) * 0.95
+    assert (after - before) == pytest.approx(expected_bus_gain, rel=1e-8)
+
+
+def test_charger_utilization_uses_occupied_time():
+    env = EBusDroneEnv(smoke_test=True)
+    env.config.setdefault("env", {})["station_update_slice_min"] = 0.5
+    st = env.station_states[1]
+    st["charger_occupied_time_min"] = 0.0
+    st["charger_observation_time_min"] = 0.0
+    st["bus_charging_intervals"] = [{
+        "station_id": 1, "bus_id": 0, "charger_index": 0,
+        "start_time_min": 0.0, "end_time_min": 2.0, "charging_power_kw": 500.0,
+    }]
+    st["charger_release_times_min"] = [2.0]
+    env._run_station_interval(0.0, 4.0)
+    assert st.get("charger_occupied_time_min", 0.0) == pytest.approx(2.0, rel=1e-6)
+    assert st.get("charger_utilization", 0.0) == pytest.approx(0.5, rel=1e-6)

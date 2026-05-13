@@ -78,7 +78,8 @@ def operate_station_step(station_state: dict, now: float, *, parcel_states: dict
     overflow_kg = max(0.0, float(station_state.get("locker_inventory_kg", 0.0)) - float(station_state.get("locker_capacity_kg", 0.0)))
     station_state["locker_overflow_amount_kg_min"] = float(station_state.get("locker_overflow_amount_kg_min", 0.0)) + overflow_kg * dt
     station_state["locker_overflow_duration_min"] = float(station_state.get("locker_overflow_duration_min", 0.0)) + (dt if overflow_kg > 0 else 0.0)
-    total_chargers = max(1, len(station_state.get("charger_release_times_min", [])))
-    active_chargers = int(round(float(p_e) / max(1e-9, float(station_state.get("P_chg", p_e if p_e > 0 else 1.0)))))
-    station_state["charger_utilization"] = float(active_chargers) / float(total_chargers)
+    if "charger_utilization" not in station_state:
+        total_chargers = max(1, len(station_state.get("charger_release_times_min", [])))
+        active_chargers = int(round(float(p_e) / max(1e-9, float(station_state.get("P_chg", p_e if p_e > 0 else 1.0)))))
+        station_state["charger_utilization"] = float(active_chargers) / float(total_chargers)
     return {"triggered": trigger, "n_disp": n_disp, "assignments": assignments, "dispatched_parcel_ids": [a["parcel_id"] for a in assignments], "delivered_parcel_ids": delivered_ids, "drone_return_ids": returned, "batteries_charged": charge["completed"], "full_batteries": station_state.get("full_batteries", 0), "depleted_batteries": station_state.get("depleted_batteries", station_state.get("empty_batteries", 0)), "P_D": power["P_D"], "P_tot": power["P_tot"], "overload": power["overload"], "charge": charge, "power": power, "metrics": {"bus_charging_energy_kwh": station_state["bus_charging_energy_kwh"], "drone_charging_energy_kwh": station_state["drone_charging_energy_kwh"], "total_energy_kwh": station_state["total_energy_kwh"], "power_overload_amount_kw_min": station_state["power_overload_amount_kw_min"], "power_overload_duration_min": station_state["power_overload_duration_min"], "charger_utilization": station_state["charger_utilization"]}}
