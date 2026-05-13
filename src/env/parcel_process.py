@@ -19,7 +19,7 @@ def get_unloading_parcels(trip_id: int, station_id: int, assignment_index: dict,
             raise ValueError(f"Parcel {pid} already delivered")
         if p["status"] == "onboard":
             out.append(int(pid))
-        elif p["status"] == "in_locker":
+        elif p["status"] in {"in_locker", "locker"}:
             raise ValueError(f"Parcel {pid} already unloaded")
     return out
 
@@ -38,6 +38,7 @@ def unload_parcels_to_locker(trip_state: dict, station_state: dict, parcel_state
             raise ValueError(f"Parcel {pid} not present onboard for trip {trip_state['trip_id']}")
         trip_state["onboard_parcel_ids"].remove(int(pid))
         p["status"] = "in_locker"
+        p["release_time_min"] = float(release_time)
         p["release_time"] = float(release_time)
         p["station_id"] = int(station_state["station_id"])
         station_state.setdefault("locker_parcels", []).append(int(pid))

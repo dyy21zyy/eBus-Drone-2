@@ -12,9 +12,11 @@ def operate_station_step(station_state: dict, now: float, *, parcel_states: dict
     parcel_states = parcel_states or {}
     delivered_ids: list[int] = []
     for p in parcel_states.values():
-        if p.get("status") == "assigned_to_drone" and p.get("delivery_completion_time") is not None and float(p["delivery_completion_time"]) <= now:
+        completion_time = p.get("delivery_completion_time_min", p.get("delivery_completion_time"))
+        if p.get("status") == "assigned_to_drone" and completion_time is not None and float(completion_time) <= now:
             p["status"] = "delivered"
-            p["lateness"] = max(0.0, float(p["delivery_completion_time"]) - float(p.get("deadline_min", p.get("deadline", now))))
+            p["delivery_completion_time_min"] = float(completion_time)
+            p["lateness"] = max(0.0, float(completion_time) - float(p.get("delivery_deadline_min", p.get("deadline_min", now))))
             delivered_ids.append(int(p["parcel_id"]))
             if delivered_parcels is not None:
                 delivered_parcels.add(int(p["parcel_id"]))
@@ -47,12 +49,21 @@ def operate_station_step(station_state: dict, now: float, *, parcel_states: dict
             for a in assignments:
                 p = parcel_states[int(a["parcel_id"])]
                 p["status"] = "assigned_to_drone"
+                p["pickup_time_min"] = now
                 p["pickup_time"] = now
                 p["drone_id"] = a["drone_id"]
-                p["delivery_completion_time"] = now + float(p["T_out"])
-                p["drone_return_time"] = now + float(p["T_rt"])
-                a["drone_return_time"] = p["drone_return_time"]
+                t_out = float(p.get("T_out_min", p.get("T_out", 0.0)))
+                t_rt = float(p.get("T_rt_min", p.get("T_rt", 0.0)))
+                p["delivery_completion_time_min"] = now + t_out
+                p["delivery_completion_time"] = p["delivery_completion_time_min"]
+                p["drone_return_time_min"] = now + t_rt
+                p["drone_return_time"] = p["drone_return_time_min"]
+                if p.get("release_time_min") is not None:
+                    p["locker_holding_time_min"] = now - float(p["release_time_min"])
+                a["drone_return_time"] = p["drone_return_time_min"]
             mark_active(station_state, assignments)
+
+    station_state["locker_inventory_kg"] = float(sum(float(parcel_states[int(pid)]["weight_kg"]) for pid in station_state.get("locker_parcels", []) if int(pid) in parcel_states and parcel_states[int(pid)].get("status") == "in_locker"))
 
     power = compute_station_power(p_e, p_l, charge["P_D"], station_state.get("P_capacity", 0.0))
     return {"triggered": trigger, "n_disp": n_disp, "assignments": assignments, "dispatched_parcel_ids": [a["parcel_id"] for a in assignments], "delivered_parcel_ids": delivered_ids, "drone_return_ids": returned, "batteries_charged": charge["completed"], "full_batteries": station_state.get("full_batteries", 0), "depleted_batteries": station_state.get("depleted_batteries", station_state.get("empty_batteries", 0)), "P_D": power["P_D"], "P_tot": power["P_tot"], "overload": power["overload"], "charge": charge, "power": power}
