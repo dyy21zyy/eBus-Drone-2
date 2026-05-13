@@ -18,14 +18,15 @@ class DDQNDRAgent(DQNDRAgent):
         rew = torch.tensor([t.reward for t in b], dtype=torch.float32, device=self.device)
         nxt = torch.tensor(np.stack([t.next_observation for t in b]), dtype=torch.float32, device=self.device)
         done = torch.tensor([t.done for t in b], dtype=torch.float32, device=self.device)
-        nmask = torch.tensor(np.stack([t.next_action_mask for t in b]), dtype=torch.float32, device=self.device)
-        nmask = nmask.clone()
-        all_zero = torch.all(nmask <= 0, dim=1)
-        nmask[all_zero, 0] = 1.0
-
         q = self.online(obs).gather(1, act.unsqueeze(1)).squeeze(1)
         with torch.no_grad():
-            q_online_next = self.online(nxt).masked_fill(nmask <= 0, -1e9)
+            q_online_next = self.online(nxt)
+            if self.use_action_mask:
+                nmask = torch.tensor(np.stack([t.next_action_mask for t in b]), dtype=torch.float32, device=self.device)
+                nmask = nmask.clone()
+                all_zero = torch.all(nmask <= 0, dim=1)
+                nmask[all_zero, 0] = 1.0
+                q_online_next = q_online_next.masked_fill(nmask <= 0, -1e9)
             a_next = q_online_next.argmax(dim=1)
             q_next = self.target(nxt).gather(1, a_next.unsqueeze(1)).squeeze(1)
             y = rew + (1 - done) * float(self.cfg.get("gamma", 0.99)) * q_next

@@ -30,6 +30,9 @@ class DQNDRAgent:
         self.optim = torch.optim.Adam(self.online.parameters(), lr=float(self.cfg.get("learning_rate", self.cfg.get("lr", 1e-3))))
         self.buffer = ReplayBuffer(int(self.cfg.get("replay_buffer_size", self.cfg.get("capacity", 5000))))
         self.steps = 0
+        # DQN-DR baseline intentionally does not use action masking inside the agent.
+        # Environment-side repair/handling is responsible for infeasible actions.
+        self.use_action_mask = False
 
     def _eps(self):
         s = float(self.cfg.get("epsilon_start", 1.0))
@@ -54,13 +57,16 @@ class DQNDRAgent:
         return torch.where(m > 0)[0].detach().cpu().tolist()
 
     def select_action(self, observation, action_mask, training=True) -> int:
-        feasible = self._feasible_indices(action_mask)
         if bool(training) and random.random() < self._eps():
-            return int(random.choice(feasible))
+            if self.use_action_mask:
+                feasible = self._feasible_indices(action_mask)
+                return int(random.choice(feasible))
+            return int(random.randrange(self.action_dim))
         with torch.no_grad():
             q = self.online(torch.as_tensor(np.asarray(observation), dtype=torch.float32, device=self.device).unsqueeze(0))[0]
-            m = self._mask_tensor(action_mask)
-            q = q.masked_fill(m <= 0, -1e9)
+            if self.use_action_mask:
+                m = self._mask_tensor(action_mask)
+                q = q.masked_fill(m <= 0, -1e9)
         return int(torch.argmax(q).item())
 
     act = select_action
@@ -88,12 +94,16 @@ class DQNDRAgent:
         rew = torch.tensor([t.reward for t in b], dtype=torch.float32, device=self.device)
         nxt = torch.tensor(np.stack([t.next_observation for t in b]), dtype=torch.float32, device=self.device)
         done = torch.tensor([t.done for t in b], dtype=torch.float32, device=self.device)
-        nmask = torch.tensor(np.stack([t.next_action_mask for t in b]), dtype=torch.float32, device=self.device)
-        nmask[:, 0] = 1.0
-
         q = self.online(obs).gather(1, act.unsqueeze(1)).squeeze(1)
         with torch.no_grad():
-            q_next = self.target(nxt).masked_fill(nmask <= 0, -1e9).max(dim=1).values
+            q_next_all = self.target(nxt)
+            if self.use_action_mask:
+                nmask = torch.tensor(np.stack([t.next_action_mask for t in b]), dtype=torch.float32, device=self.device)
+                nmask = nmask.clone()
+                all_zero = torch.all(nmask <= 0, dim=1)
+                nmask[all_zero, 0] = 1.0
+                q_next_all = q_next_all.masked_fill(nmask <= 0, -1e9)
+            q_next = q_next_all.max(dim=1).values
             y = rew + (1 - done) * float(self.cfg.get("gamma", 0.99)) * q_next
         loss = F.mse_loss(q, y)
         self.optim.zero_grad()
