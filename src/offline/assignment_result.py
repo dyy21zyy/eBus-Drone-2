@@ -27,6 +27,7 @@ class AssignmentResult:
     number_customers: int = 0
     feasibility_summary: dict | None = None
     cost_components: dict | None = None
+    metadata: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -43,6 +44,7 @@ class AssignmentResult:
             "number_customers": self.number_customers,
             "feasibility_summary": self.feasibility_summary,
             "cost_components": self.cost_components,
+            "metadata": self.metadata,
             "decisions": [asdict(d) for d in self.decisions],
         }
 
@@ -63,4 +65,5 @@ class AssignmentResult:
             number_customers=int(payload.get("number_customers", 0)),
             feasibility_summary=payload.get("feasibility_summary"),
             cost_components=payload.get("cost_components"),
+            metadata=payload.get("metadata"),
         )

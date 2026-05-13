@@ -7,10 +7,14 @@ from src.offline.assignment_io import read_assignment, write_assignment
 from src.offline.assignment_io import build_assignment_indices
 from src.offline.assignment_solver import solve_assignment
 from src.offline.assignment_solver import AssignmentInfeasibleError
+from src.main import run_generate
 
 
 def _load_instance(seed: int = 1, instance: str = "small"):
     fp = Path("data/generated") / instance / f"instance_seed_{seed}.json"
+    if not fp.exists():
+        from src.utils.config import load_yaml
+        run_generate(load_yaml("configs/default.yaml"), instance, seed)
     assert fp.exists(), "Run generate mode first"
     return json.loads(fp.read_text(encoding="utf-8"))
 
@@ -57,6 +61,24 @@ def test_offline_assignment_constraints_and_io(tmp_path):
     loaded = read_assignment(str(out))
     assert loaded.total_cost == result.total_cost
     assert len(loaded.decisions) == len(result.decisions)
+    assert "metadata" not in loaded.to_dict() or isinstance(loaded.to_dict().get("metadata"), (dict, type(None)))
+
+
+def test_nominal_drone_timing_contains_service_and_turnaround():
+    instance = _load_instance()
+    data = build_assignment_data(instance)
+    svc = float(instance["drone"]["customer_service_time_min"])
+    turn = float(instance["drone"]["turnaround_time_min"])
+    speed = float(instance["drone"]["speed_kmh"])
+    for c in instance["customers"]:
+        i = int(c["customer_id"])
+        for option in c["feasible_stations"]:
+            h = int(option["station_id"])
+            d = float(option["distance_km"])
+            expected_out = (d / speed) * 60.0 + svc
+            expected_rt = (2.0 * d / speed) * 60.0 + svc + turn
+            assert abs(data.t_hi_out[(h, i)] - expected_out) < 1e-3
+            assert abs(data.t_hi_rt[(h, i)] - expected_rt) < 1e-3
 
 
 def test_build_assignment_indices_roundtrip():
@@ -81,3 +103,21 @@ def test_no_silent_fallback():
         pass
     else:
         raise AssertionError("Expected AssignmentInfeasibleError when fallback is disabled")
+
+
+def test_assignment_output_metadata():
+    from src.main import run_offline
+    from src.utils.config import load_yaml
+
+    cfg = load_yaml("configs/default.yaml")
+    run_offline(cfg, "small", 1)
+    payload = _load_instance()
+    assert payload
+    out = Path(cfg["paths"]["outputs"]) / "assignments" / "offline_assignment_small_seed_1.json"
+    result_payload = json.loads(out.read_text(encoding="utf-8"))
+    meta = result_payload.get("metadata", {})
+    assert meta["instance_name"] == "small"
+    assert meta["seed"] == 1
+    assert "unloaded_parcel_volume_kg_by_bus_station" in meta
+    assert "planned_locker_occupancy_summary_kg" in meta
+    assert "planned_drone_workload_by_station_min" in meta

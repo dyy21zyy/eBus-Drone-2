@@ -13,6 +13,7 @@ from src.harness.trainer import train_agent
 from src.offline.assignment_data_builder import build_assignment_data
 from src.offline.assignment_io import load_offline_assignment, write_assignment
 from src.offline.assignment_solver import solve_assignment
+from src.offline.assignment_validator import summarize_assignment_flows
 from src.utils.config import load_instance, load_scenario, load_yaml
 from src.utils.random_seed import set_seed
 
@@ -25,9 +26,11 @@ def run_generate(cfg, instance_name: str, seed: int):
 
 def run_offline(cfg, instance_name: str, seed: int):
     instance = load_instance(instance_name, seed)
-    result = solve_assignment(build_assignment_data(instance), allow_greedy_fallback=bool(cfg.get("offline", {}).get("allow_greedy_fallback", False)))
+    data = build_assignment_data(instance)
+    result = solve_assignment(data, allow_greedy_fallback=bool(cfg.get("offline", {}).get("allow_greedy_fallback", False)))
     out = Path(cfg["paths"]["outputs"]) / "assignments" / f"offline_assignment_{instance_name}_seed_{seed}.json"
-    write_assignment(result, str(out))
+    metadata = {"instance_name": instance_name, "seed": seed, **summarize_assignment_flows(data, result)}
+    write_assignment(result, str(out), metadata=metadata)
 
 def build_env(cfg, instance_name: str, seed: int, smoke_test: bool) -> EBusDroneEnv:
     return EBusDroneEnv(config=cfg, instance=load_instance(instance_name, seed), scenario=load_scenario(instance_name, seed), assignment=load_offline_assignment(instance_name, seed), smoke_test=smoke_test)

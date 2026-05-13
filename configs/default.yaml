@@ -10,6 +10,8 @@ offline:
 generation:
   horizon_minutes: 360
   num_scenarios: 1
+  allow_infeasible_deadlines: false
+  max_customer_generation_retries: 100
 network:
   num_stops: 30
   stop_spacing_km: 1.0
