@@ -14,12 +14,26 @@ from src.policies import BatteryThresholdPolicy, DwellGreedyPolicy, LearnedPolic
 AGENT_MAP={"dqn_dr":DQNDRAgent,"ddqn_dr":DDQNDRAgent,"am_ddqn_dr":AMDDQNDRAgent,"proposed":AMDuelingDDQNDRAgent,"am_dueling_ddqn_dr":AMDuelingDDQNDRAgent}
 
 def normalize_method_name(method:str)->str:
-    return 'dwell_greedy' if method=='dwell_based_greedy' else method
+    if method == 'dwell_based_greedy':
+        return 'dwell_greedy'
+    if method == 'proposed':
+        return 'am_dueling_ddqn_dr'
+    return method
+
+
+def uniform_seconds_from_method(method: str) -> int:
+    method = normalize_method_name(method)
+    if not method.startswith('uniform_'):
+        raise ValueError(f"Method is not a uniform charging policy: {method}")
+    suffix = method.removeprefix('uniform_')
+    if not suffix.isdigit() or int(suffix) <= 0:
+        raise ValueError(f"Invalid uniform method format: {method}. Expected uniform_<positive_integer_seconds>.")
+    return int(suffix)
 
 def build_policy(method: str, env: EBusDroneEnv, out_root='outputs', checkpoint: str|None=None, train_if_missing: bool=False, smoke_test: bool=False, cfg:dict|None=None, seed:int=0, instance_name:str='unknown'):
     method=normalize_method_name(method)
     if method == 'no_charging': return NoChargingPolicy()
-    if method.startswith('uniform_'): return UniformPolicy(int(method.split('_')[1]))
+    if method.startswith('uniform_'): return UniformPolicy(uniform_seconds_from_method(method))
     if method == 'max_feasible': return MaxFeasiblePolicy()
     if method == 'dwell_greedy': return DwellGreedyPolicy()
     if method == 'battery_threshold': return BatteryThresholdPolicy()
@@ -44,7 +58,7 @@ def run_benchmark(methods, out_csv: str, env_builder, instance_name:str, test_se
             t0=time.time()
             pol = build_policy(m, env, out_root=cfg['paths']['outputs'], train_if_missing=train_if_missing, smoke_test=smoke_test, cfg=cfg, seed=seed, instance_name=instance_name)
             met=evaluate_policy(env, pol, episodes=1, max_steps=10 if smoke_test else None)
-            met.update({'method':m,'instance':instance_name,'seed':seed,'runtime_sec':time.time()-t0,'smoke_mode':bool(smoke_test)})
+            met.update({'method':m,'instance':instance_name,'seed':seed,'runtime_sec':time.time()-t0,'smoke':bool(smoke_test),'smoke_mode':bool(smoke_test)})
             rows.append(met)
     if not rows: raise ValueError('Benchmark produced no rows.')
     for m in methods:

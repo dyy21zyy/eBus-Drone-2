@@ -10,7 +10,7 @@ from src.data_generation.instance_writer import write_instance
 from src.data_generation.scenario_generator import generate_instance, generate_scenario
 from src.env.ebus_drone_env import EBusDroneEnv
 from src.harness.ablation_runner import run_ablation
-from src.harness.benchmark_runner import build_policy, run_benchmark
+from src.harness.benchmark_runner import build_policy, normalize_method_name, run_benchmark, uniform_seconds_from_method
 from src.harness.evaluator import evaluate_policy, save_eval_metrics
 from src.harness.sensitivity_runner import FACTOR_PATHS, run_sensitivity
 from src.harness.trainer import train_agent
@@ -23,7 +23,10 @@ from src.utils.metrics import REQUIRED_PAPER_METRICS
 from src.utils.random_seed import set_seed
 
 VALID_METHODS = {
-    "uniform_30", "dwell_based_greedy", "dwell_greedy", "battery_threshold", "dqn_dr", "ddqn_dr", "am_ddqn_dr", "proposed", "no_charging", "max_feasible",
+    "uniform_15", "uniform_30", "uniform_45", "uniform_60", "uniform_120",
+    "dwell_based_greedy", "dwell_greedy", "battery_threshold",
+    "dqn_dr", "ddqn_dr", "am_ddqn_dr", "proposed", "am_dueling_ddqn_dr",
+    "no_charging", "max_feasible",
 }
 
 
@@ -73,9 +76,19 @@ def _validate_args(args):
         raise ValueError("Sensitivity mode requires --sensitivity.")
     if args.sensitivity and args.sensitivity not in FACTOR_PATHS:
         raise ValueError(f"Unknown sensitivity variable: {args.sensitivity}")
-    for m in args.methods or []:
-        if m not in VALID_METHODS:
+    methods_to_validate = list(args.methods or []) + ([args.method] if args.method else [])
+    for m in methods_to_validate:
+        nm = normalize_method_name(m)
+        if m.startswith("uniform_") or nm.startswith("uniform_"):
+            uniform_seconds_from_method(m)
+            continue
+        if m not in VALID_METHODS and nm not in VALID_METHODS:
             raise ValueError(f"Unknown method: {m}")
+    if args.mode in ('benchmark', 'ablation', 'sensitivity', 'pipeline'):
+        if args.smoke:
+            pass
+        elif args.max_steps is not None and not args.allow_truncated_for_testing:
+            raise ValueError("Formal experiments require full horizon: --max-steps is disallowed unless --allow-truncated-for-testing is set.")
 
 
 def _resolve_plan(args):
@@ -94,7 +107,7 @@ def _run_eval(cfg, instance, seed, method, args, rows):
     except TypeError:
         pol = build_policy(method)
     m = evaluate_policy(env, pol, episodes=1, max_steps=args.max_steps if args.max_steps is not None else (10 if args.smoke else None))
-    m.update({'method': method, 'instance': instance, 'seed': seed})
+    m.update({'method': normalize_method_name(method), 'instance': instance, 'seed': seed, 'smoke': bool(args.smoke)})
     rows.append(m)
 
 
@@ -137,6 +150,7 @@ def main():
     ap.add_argument('--factor'); ap.add_argument('--values', nargs='+', type=float)
     ap.add_argument('--sensitivity')
     ap.add_argument('--max-steps', type=int, default=None)
+    ap.add_argument('--allow-truncated-for-testing', action='store_true')
     ap.add_argument('--output-dir')
     ap.add_argument('--overwrite', action='store_true')
     args = ap.parse_args()
@@ -176,6 +190,10 @@ def main():
         out = Path(cfg['paths']['outputs']) / 'metrics' / f"eval_{plan['methods'][0]}_{plan['instances'][0]}.csv"
         save_eval_metrics(rows, str(out)); print(json.dumps(rows)); return
     if args.mode in ('benchmark', 'ablation', 'sensitivity', 'pipeline'):
+        if args.smoke:
+            cfg['paths']['outputs'] = str(Path(cfg['paths']['outputs']) / 'smoke')
+        elif args.max_steps is not None and not args.allow_truncated_for_testing:
+            raise ValueError("Formal experiments require full horizon with --max-steps unset. Use --allow-truncated-for-testing to override for tests.")
         if args.mode == 'pipeline':
             for i in plan['instances']:
                 for s in plan['seeds']:

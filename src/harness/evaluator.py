@@ -12,11 +12,16 @@ def _required_component(rc: dict, key: str) -> float:
 def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None):
     metrics = init_metrics()
     min_bat = float("inf")
+    termination_reason = None
+    terminated_by_env = False
+    truncated_by_max_steps = False
     for ep in range(episodes):
         obs, _ = env.reset(seed=ep)
         step_idx = 0
         while True:
             if max_steps is not None and step_idx >= int(max_steps):
+                truncated_by_max_steps = True
+                termination_reason = 'max_steps_truncated'
                 break
             mask = env.get_action_mask()
             event = getattr(env, 'current_event', None)
@@ -37,6 +42,8 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
             if not rc:
                 metrics['total_reward'] += reward
                 if terminated or truncated:
+                    terminated_by_env = bool(terminated)
+                    termination_reason = info.get('termination_reason') or ('truncated' if truncated else termination_reason)
                     break
                 continue
             metrics['total_reward'] += reward
@@ -58,6 +65,8 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
             metrics['repaired_actions'] += int(info.get('action_repaired', False))
             min_bat = min(min_bat, float(env.state.get('battery', 0)))
             if terminated or truncated:
+                terminated_by_env = bool(terminated)
+                termination_reason = info.get('termination_reason') or ('truncated' if truncated else termination_reason)
                 break
 
     metrics['minimum_bus_battery'] = 0.0 if min_bat == float('inf') else min_bat
@@ -67,6 +76,11 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
     metrics['drone_battery_stockout_count'] = float(sum(1 for st in getattr(env, 'station_states', {}).values() if st.get('full_batteries', 0) <= 0))
 
     out = finalize_metrics(metrics)
+    out['max_steps'] = max_steps
+    out['episode_end_time'] = float(getattr(env, 'state', {}).get('time', 0.0))
+    out['operating_horizon'] = float(getattr(env, 'horizon', getattr(env, 'state', {}).get('horizon', 0.0)))
+    out['termination_reason'] = termination_reason or ('horizon_reached' if out['episode_end_time'] >= out['operating_horizon'] else 'unknown')
+    out['full_horizon_completed'] = bool(terminated_by_env and out['termination_reason'] == 'horizon_reached' and not truncated_by_max_steps)
     missing = [k for k in REQUIRED_PAPER_METRICS if k not in out]
     if missing:
         raise KeyError(f"Missing required paper metrics in evaluator output: {missing}")
