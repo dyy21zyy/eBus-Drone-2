@@ -20,8 +20,8 @@ def read_assignment(path: str) -> AssignmentResult:
     return AssignmentResult.from_dict(payload)
 
 
-def load_offline_assignment(instance_name: str, seed: int) -> dict:
-    path = Path("outputs/assignments") / f"offline_assignment_{instance_name}_seed_{seed}.json"
+def load_offline_assignment(instance_name: str, seed: int, outputs_root: str | Path = "outputs") -> dict:
+    path = Path(outputs_root) / "assignments" / f"offline_assignment_{instance_name}_seed_{seed}.json"
     if not path.exists():
         raise FileNotFoundError(
             "Missing offline assignment file: "
