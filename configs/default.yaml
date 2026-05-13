@@ -5,6 +5,8 @@ seed: 1
 paths:
   data_generated: data/generated
   outputs: outputs
+offline:
+  allow_greedy_fallback: false
 generation:
   horizon_minutes: 360
   num_scenarios: 1

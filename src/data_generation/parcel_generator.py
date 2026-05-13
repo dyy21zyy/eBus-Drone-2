@@ -13,6 +13,8 @@ def generate_customers_and_parcels(config: dict, instance_cfg: dict, stops: list
     turn = float(config["drone"]["turnaround_time_min"])
     max_dur = float(config["drone"]["max_round_trip_duration_min"])
     horizon = float(config["generation"]["horizon_minutes"])
+    wait_nominal = float(config["parcel"]["nominal_locker_waiting_time_min"])
+    nominal_unloading = float(config["parcel"].get("nominal_unloading_time_min", 0.0))
     customers=[]
     for cid in range(1, int(instance_cfg["num_customers"]) + 1):
         while True:
@@ -26,8 +28,13 @@ def generate_customers_and_parcels(config: dict, instance_cfg: dict, stops: list
                     if rt <= max_dur:
                         feasible.append({"station_id":sid,"distance_km":round(d,4),"mission_duration_min":round(rt,4)})
             if feasible:
-                fastest=min(v["mission_duration_min"] for v in feasible)
-                deadline=rng.uniform(fastest+5.0,horizon)
+                # Planned-feasibility check against paper timing:
+                # scheduled_arrival + nominal_unloading + nominal_wait + outbound_time <= deadline.
+                # Here we enforce feasibility with arrival lower-bounded at 0 at generation time.
+                fastest_outbound = min(v["mission_duration_min"] * 0.5 for v in feasible)
+                min_feasible_deadline = nominal_unloading + wait_nominal + fastest_outbound
+                upper = max(horizon, min_feasible_deadline + 1.0)
+                deadline = rng.uniform(min_feasible_deadline, upper)
                 customers.append({"customer_id":cid,"x_km":round(x,4),"y_km":round(y,4),"parcel_weight_kg":rng.choice(values),"feasible_stations":feasible,"delivery_deadline_min":round(deadline,4)})
                 break
     return {"customers":customers}
