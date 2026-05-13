@@ -1,5 +1,7 @@
 from __future__ import annotations
 from src.harness.benchmark_runner import run_benchmark
 
-def run_ablation(out_path:str, env=None, smoke_test: bool=False):
-    return run_benchmark(["dqn_dr","ddqn_dr","am_ddqn_dr","proposed"], out_path, env=env, smoke_test=smoke_test)
+
+def run_ablation(out_csv:str, env_builder, instance_name:str, test_seeds:list[int], cfg:dict, smoke_test: bool=False, train_if_missing: bool=False):
+    methods=["dqn_dr","ddqn_dr","am_ddqn_dr","proposed"]
+    return run_benchmark(methods, out_csv, env_builder=env_builder, instance_name=instance_name, test_seeds=test_seeds, cfg=cfg, smoke_test=smoke_test, train_if_missing=train_if_missing)
