@@ -52,15 +52,15 @@ def _load_json_required(path: Path, kind: str, hint_cmds: list[str]) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def load_instance(instance_name: str, seed: int) -> dict:
-    path = Path("data/generated") / instance_name / f"instance_seed_{seed}.json"
+def load_instance(instance_name: str, seed: int, generated_root: str | Path = "data/generated") -> dict:
+    path = Path(generated_root) / instance_name / f"instance_seed_{seed}.json"
     return _load_json_required(path, "instance", [
         f"python -m src.main --mode generate --config configs/default.yaml --instance {instance_name} --seed {seed}",
     ])
 
 
-def load_scenario(instance_name: str, seed: int, scenario_id: int = 0) -> dict:
-    path = Path("data/generated") / instance_name / f"scenario_{scenario_id}_seed_{seed}.json"
+def load_scenario(instance_name: str, seed: int, scenario_id: int = 0, generated_root: str | Path = "data/generated") -> dict:
+    path = Path(generated_root) / instance_name / f"scenario_{scenario_id}_seed_{seed}.json"
     return _load_json_required(path, "scenario", [
         f"python -m src.main --mode generate --config configs/default.yaml --instance {instance_name} --seed {seed}",
     ])

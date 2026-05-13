@@ -43,7 +43,7 @@ def run_generate(cfg, instance_name: str, seed: int):
 
 
 def run_offline(cfg, instance_name: str, seed: int):
-    instance = load_instance(instance_name, seed)
+    instance = load_instance(instance_name, seed, cfg["paths"]["data_generated"])
     data = build_assignment_data(instance)
     result = solve_assignment(data, allow_greedy_fallback=bool(cfg.get("offline", {}).get("allow_greedy_fallback", False)))
     out = Path(cfg["paths"]["outputs"]) / "assignments" / f"offline_assignment_{instance_name}_seed_{seed}.json"
@@ -54,7 +54,7 @@ def run_offline(cfg, instance_name: str, seed: int):
 def build_env(cfg, instance_name: str, seed: int, smoke_test: bool) -> EBusDroneEnv:
     assign_path = Path(cfg["paths"]["outputs"]) / "assignments" / f"offline_assignment_{instance_name}_seed_{seed}.json"
     _require_exists(assign_path, f"Missing offline assignment: {assign_path}. Run --mode offline first.")
-    return EBusDroneEnv(config=cfg, instance=load_instance(instance_name, seed), scenario=load_scenario(instance_name, seed), assignment=load_offline_assignment(instance_name, seed), smoke_test=smoke_test)
+    return EBusDroneEnv(config=cfg, instance=load_instance(instance_name, seed, cfg["paths"]["data_generated"]), scenario=load_scenario(instance_name, seed, generated_root=cfg["paths"]["data_generated"]), assignment=load_offline_assignment(instance_name, seed, outputs_root=cfg["paths"]["outputs"]), smoke_test=smoke_test)
 
 
 def _save_run_metadata(run_dir: Path, cfg: dict, args: argparse.Namespace, plan: dict):

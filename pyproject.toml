@@ -10,3 +10,10 @@ dependencies = ["numpy","pandas","PyYAML","matplotlib","torch","scipy"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+markers = [
+  "unit: fast isolated tests",
+  "integration: multi-module workflow tests",
+  "slow: longer-running tests",
+  "smoke: lightweight end-to-end checks"
+]

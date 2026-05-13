@@ -35,11 +35,11 @@ def test_scalability_plan_resolves_instances(tmp_path, monkeypatch, capsys):
     assert plan['instances'] == ['small', 'medium', 'large']
 
 
-def test_multiple_seeds_output(tmp_path, monkeypatch):
-    out = tmp_path / 'o'
-    _run(['--mode', 'generate', '--config', 'configs/default.yaml', '--instance', 'small', '--seeds', '1', '2', '--output-dir', str(out)], monkeypatch)
-    assert Path('data/generated/small/instance_seed_1.json').exists()
-    assert Path('data/generated/small/instance_seed_2.json').exists()
+def test_multiple_seeds_output(tmp_path, monkeypatch, temp_config):
+    _run(['--mode', 'generate', '--config', str(temp_config), '--instance', 'small', '--seeds', '1', '2'], monkeypatch)
+    base = tmp_path / 'data' / 'generated' / 'small'
+    assert (base / 'instance_seed_1.json').exists()
+    assert (base / 'instance_seed_2.json').exists()
 
 
 def test_unknown_method_fails(monkeypatch):
