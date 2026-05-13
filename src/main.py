@@ -28,7 +28,11 @@ def run_generate(cfg, instance_name: str, seed: int):
 
 def run_offline(cfg, instance_name: str, seed: int):
     instance = load_instance(instance_name, seed)
-    result = solve_assignment(build_assignment_data(instance))
+    allow_fallback = bool(cfg.get("offline", {}).get("allow_greedy_fallback", False))
+    result = solve_assignment(build_assignment_data(instance), allow_greedy_fallback=allow_fallback)
+    print(f"[offline] solver={result.solver_name} status={result.status} used_fallback={result.used_fallback} objective={result.objective_value}")
+    if result.used_fallback:
+        print(f"[offline] fallback_reason={result.fallback_reason}")
     out = Path(cfg["paths"]["outputs"]) / "assignments" / f"offline_assignment_{instance_name}_seed_{seed}.json"
     write_assignment(result, str(out))
 

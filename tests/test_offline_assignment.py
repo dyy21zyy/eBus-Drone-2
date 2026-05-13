@@ -1,10 +1,12 @@
 import json
 from pathlib import Path
+from dataclasses import replace
 
 from src.offline.assignment_data_builder import build_assignment_data
 from src.offline.assignment_io import read_assignment, write_assignment
 from src.offline.assignment_io import build_assignment_indices
 from src.offline.assignment_solver import solve_assignment
+from src.offline.assignment_solver import AssignmentInfeasibleError
 
 
 def _load_instance(seed: int = 1, instance: str = "small"):
@@ -16,7 +18,7 @@ def _load_instance(seed: int = 1, instance: str = "small"):
 def test_offline_assignment_constraints_and_io(tmp_path):
     instance = _load_instance()
     data = build_assignment_data(instance)
-    result = solve_assignment(data)
+    result = solve_assignment(data, allow_greedy_fallback=False)
 
     assert len(result.decisions) == len(data.customers)
     assert len({d.customer_id for d in result.decisions}) == len(data.customers)
@@ -43,6 +45,12 @@ def test_offline_assignment_constraints_and_io(tmp_path):
     assert all(unload[(b, h)] <= data.q_u[h] + 1e-9 for b in data.trips for h in data.stations)
     assert all(locker_load[(h, tau)] <= data.k[h] + 1e-9 for h in data.stations for tau in data.t_grid)
     assert all(drone[h] <= data.num_drones[h] * data.operating_horizon + 1e-9 for h in data.stations)
+    assert result.status
+    assert result.objective_value is not None
+    assert result.solver_name
+    assert result.number_assigned_customers == len(data.customers)
+    assert result.number_customers == len(data.customers)
+    assert isinstance(result.used_fallback, bool)
 
     out = tmp_path / "assignment.json"
     write_assignment(result, str(out))
@@ -54,7 +62,22 @@ def test_offline_assignment_constraints_and_io(tmp_path):
 def test_build_assignment_indices_roundtrip():
     instance = _load_instance()
     data = build_assignment_data(instance)
-    result = solve_assignment(data).to_dict()
+    result = solve_assignment(data, allow_greedy_fallback=False).to_dict()
     idx = build_assignment_indices(result)
     assert idx["by_trip_station"]
     assert len(idx["by_customer"]) == len(data.customers)
+
+
+def test_no_silent_fallback():
+    instance = _load_instance()
+    data0 = build_assignment_data(instance)
+    q_f = dict(data0.q_f)
+    for b in data0.trips:
+        q_f[b] = 0.0
+    data = replace(data0, q_f=q_f)
+    try:
+        solve_assignment(data, allow_greedy_fallback=False)
+    except AssignmentInfeasibleError:
+        pass
+    else:
+        raise AssertionError("Expected AssignmentInfeasibleError when fallback is disabled")

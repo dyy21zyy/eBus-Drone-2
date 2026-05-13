@@ -46,6 +46,7 @@ def build_assignment_data(instance: dict) -> AssignmentData:
     beta_l = float(instance["parcel"]["cost"]["lateness_per_min"])
     wait_nominal = float(instance["parcel"]["nominal_locker_waiting_time_min"])
     unload_sec_per_kg = float(instance["parcel"]["unloading_time_sec_per_kg"])
+    nominal_unloading_time_min = float(instance["parcel"].get("nominal_unloading_time_min", (instance["parcel"]["unloading_capacity_kg_per_stop"] * unload_sec_per_kg) / 60.0))
 
     customers = [int(c["customer_id"]) for c in customers_raw]
     trips = [int(b["trip_id"]) for b in trips_raw]
@@ -76,6 +77,8 @@ def build_assignment_data(instance: dict) -> AssignmentData:
             t_hi_rt[(h, i)] = rt
             c_d[(h, i)] = drone_cost_km * d
         feasible_stations_by_customer[i] = feasible
+        if not feasible:
+            raise ValueError(f"Customer {i} has no feasible station candidates.")
 
     q_f = {b: float(instance["bus"]["freight_capacity_kg"]) for b in trips}
     q_u = {h: float(instance["parcel"]["unloading_capacity_kg_per_stop"]) for h in stations}
@@ -96,7 +99,10 @@ def build_assignment_data(instance: dict) -> AssignmentData:
             station_dist_km = float(instance["network"]["distances_km"][0][h - 1])
             c_b[(b, h)] = bus_cost_kgkm * station_dist_km
             t_bh_0[(b, h)] = dep + float(travel[0][h - 1])
-            t_u_bh_0[(b, h)] = (q_u[h] * unload_sec_per_kg) / 60.0
+            # T_bh_U_0 nominal unloading time for bus-trip/station event.
+            # We keep this deterministic and configurable; by default we preserve the
+            # prior conservative approximation derived from unloading capacity * sec/kg.
+            t_u_bh_0[(b, h)] = nominal_unloading_time_min
 
     r_bhi_0 = {}
     p_bhi_0 = {}

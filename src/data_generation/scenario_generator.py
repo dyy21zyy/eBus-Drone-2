@@ -10,6 +10,20 @@ def generate_instance(config: dict, instance_cfg: dict, seed: int) -> dict:
     network = generate_network(config, instance_cfg)
     stations = generate_stations(config, instance_cfg)
     customers = generate_customers_and_parcels(config, instance_cfg, network["stops"], stations["station_ids"], seed)
+    wait_nominal = float(config["parcel"]["nominal_locker_waiting_time_min"])
+    nominal_unloading = float(config["parcel"].get("nominal_unloading_time_min", (config["parcel"]["unloading_capacity_kg_per_stop"] * config["parcel"]["unloading_time_sec_per_kg"]) / 60.0))
+    min_departure = min(float(t["departure_min"]) for t in network["scheduled_bus_trips"])
+    travel = network["nominal_travel_time_min"][0]
+    for c in customers["customers"]:
+        min_completion = float("inf")
+        for opt in c["feasible_stations"]:
+            sid = int(opt["station_id"])
+            outbound = float(opt["mission_duration_min"]) * 0.5
+            arrival = min_departure + float(travel[sid - 1])
+            completion = arrival + nominal_unloading + wait_nominal + outbound
+            min_completion = min(min_completion, completion)
+        if c["delivery_deadline_min"] < min_completion:
+            c["delivery_deadline_min"] = round(min_completion, 4)
     passenger = generate_passenger_parameters(config, network["stops"], seed)
     return {
         "instance_name": instance_cfg["name"],

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import time
 
 from src.offline.assignment_model import build_assignment_model
 from src.offline.assignment_result import AssignmentDecision, AssignmentResult
@@ -21,7 +22,21 @@ def _objective_for_key(data, key):
     )
 
 
-def _greedy_fallback(data):
+def _cost_components(data, decisions):
+    bus = sum(data.c_b[(d.trip_id, d.station_id)] * data.parcel_weight[d.customer_id] for d in decisions)
+    drone = sum(data.c_d[(d.station_id, d.customer_id)] for d in decisions)
+    hold = sum(data.beta_h * data.parcel_weight[d.customer_id] * data.h_bhi_0[(d.trip_id, d.station_id, d.customer_id)] for d in decisions)
+    late = sum(data.beta_l * data.lateness_0_plus[(d.trip_id, d.station_id, d.customer_id)] for d in decisions)
+    return {
+        "bus_transport_cost": float(bus),
+        "drone_delivery_cost": float(drone),
+        "planned_locker_holding_cost": float(hold),
+        "planned_lateness_cost": float(late),
+        "total_objective": float(bus + drone + hold + late),
+    }
+
+
+def _greedy_fallback(data, fallback_reason: str):
     bus_load = defaultdict(float)
     unload_load = defaultdict(float)
     drone_work = defaultdict(float)
@@ -77,14 +92,22 @@ def _greedy_fallback(data):
                 locker_load[(h, tau)] += q
         decisions.append(AssignmentDecision(customer_id=i, trip_id=b, station_id=h, planned_cost=cost))
 
-    result = AssignmentResult(decisions=decisions, total_cost=sum(d.planned_cost for d in decisions), method="greedy_fallback")
+    components = _cost_components(data, decisions)
+    result = AssignmentResult(
+        decisions=decisions, total_cost=components["total_objective"], method="greedy_fallback",
+        solver_name="greedy_fallback", status="fallback_feasible", objective_value=components["total_objective"],
+        used_fallback=True, fallback_reason=fallback_reason, number_assigned_customers=len(decisions),
+        number_customers=len(data.customers), feasibility_summary={"all_customers_assigned_exactly_once": True},
+        cost_components=components
+    )
     validate_assignment(data, result)
     return result
 
 
-def solve_assignment(data):
+def solve_assignment(data, allow_greedy_fallback: bool = False):
     model = build_assignment_model(data)
     idx = {k: i for i, k in enumerate(model.variable_keys)}
+    start = time.perf_counter()
     try:
         import numpy as np
         from scipy.optimize import Bounds, LinearConstraint, milp
@@ -140,8 +163,9 @@ def solve_assignment(data):
             constraints.append(LinearConstraint(row, -np.inf, data.num_drones[h] * data.operating_horizon))
 
         res = milp(c=c, constraints=constraints, integrality=integrality, bounds=bounds)
+        status = str(getattr(res, "message", "unknown"))
         if not res.success:
-            raise AssignmentInfeasibleError(f"MILP failed: {res.message}")
+            raise AssignmentInfeasibleError(f"MILP failed: {status}")
 
         x = res.x
         decisions = []
@@ -149,8 +173,18 @@ def solve_assignment(data):
             if x[j] >= 0.5:
                 b, h, i = key
                 decisions.append(AssignmentDecision(customer_id=i, trip_id=b, station_id=h, planned_cost=_objective_for_key(data, key)))
-        result = AssignmentResult(decisions=decisions, total_cost=float(sum(d.planned_cost for d in decisions)), method="scipy_milp")
+        components = _cost_components(data, decisions)
+        result = AssignmentResult(
+            decisions=decisions, total_cost=components["total_objective"], method="scipy_milp",
+            solver_name="scipy.optimize.milp", status=status, objective_value=float(res.fun),
+            runtime_sec=float(time.perf_counter() - start), mip_gap=getattr(res, "mip_gap", None),
+            used_fallback=False, number_assigned_customers=len(decisions), number_customers=len(data.customers),
+            feasibility_summary={"all_customers_assigned_exactly_once": len(decisions) == len(data.customers)},
+            cost_components=components
+        )
         validate_assignment(data, result)
         return result
-    except Exception:
-        return _greedy_fallback(data)
+    except Exception as exc:
+        if not allow_greedy_fallback:
+            raise AssignmentInfeasibleError(f"MILP solve failed and greedy fallback is disabled: {exc}") from exc
+        return _greedy_fallback(data, fallback_reason=str(exc))
