@@ -145,3 +145,38 @@ def test_locker_inventory_increases_on_unload():
     assert st["locker_inventory_kg"] >= before
     for pid in info["unloaded_parcels"]:
         assert env.parcel_states[pid]["release_time_min"] == info["departure_time_min"]
+
+def test_step_reports_transition_reward_deltas_and_components():
+    env = _build_env(seed=3)
+    ev = env.current_decision_event
+    assert ev is not None
+    before_t = env.state["time"]
+    _, reward, _, _, info = env.step(0)
+    assert info["transition_start_time"] == before_t
+    assert info["transition_end_time"] >= info["departure_time_min"]
+    assert "reward_components" in info and info["reward_components"]
+    rc = info["reward_components"]
+    alphas = env._reward_alphas()
+    expected_cost = (
+        alphas["alpha_1"] * info["passenger_delay_delta"]
+        + alphas["alpha_2"] * (info["parcel_lateness_delta"] + info["terminal_undelivered_penalty"])
+        + alphas["alpha_3"] * info["energy_consumption_delta"]
+        + alphas["alpha_4"] * info["power_overload_delta"]
+        + alphas["alpha_5"] * info["battery_violation_delta"]
+        + alphas["alpha_6"] * info["locker_overflow_delta"]
+    )
+    assert reward == -expected_cost
+    assert reward == rc["reward"]
+
+
+def test_terminal_penalty_only_on_terminal_transition():
+    env = _build_env(seed=4)
+    penalty_seen = []
+    for _ in range(200):
+        _, _, done, _, info = env.step(0)
+        penalty_seen.append(info.get("terminal_undelivered_penalty", 0.0))
+        if done:
+            break
+    assert sum(1 for p in penalty_seen if p > 0.0) <= 1
+    if penalty_seen:
+        assert penalty_seen[-1] >= 0.0
