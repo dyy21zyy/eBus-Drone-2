@@ -19,7 +19,14 @@ def start_charging_jobs(station_state: dict, now: float, p_e: float, p_l: float)
     g_max = int(station_state.get("G_max", station_state.get("charging_slots", 0)))
     p_capacity = float(station_state.get("P_capacity", 0.0))
     p_bat = float(station_state.get("P_bat", station_state.get("battery_charge_power_kw", 1.0)))
-    charge_duration = float(station_state.get("battery_charge_duration_min", 10.0))
+    charge_duration = station_state.get("battery_charge_duration_min")
+    if charge_duration is None:
+        cap_kwh = station_state.get("battery_capacity_kwh")
+        if cap_kwh is not None and p_bat > 0:
+            charge_duration = 60.0 * float(cap_kwh) / float(p_bat)
+        else:
+            charge_duration = 10.0
+    charge_duration = float(charge_duration)
 
     residual_power = max(0.0, p_capacity - float(p_e) - float(p_l))
     residual_slots = math.floor(residual_power / p_bat) if p_bat > 0 else 0
