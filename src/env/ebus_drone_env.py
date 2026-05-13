@@ -52,7 +52,7 @@ class EBusDroneEnv:
         self.assignment_index = build_assignment_indices(self.assignment)
         self.calendar = EventCalendar()
         self.event_log = []
-        self.episode_metrics = {"number_decision_events": 0, "terminal_penalty": 0.0}
+        self.episode_metrics = {"number_decision_events": 0, "terminal_penalty": 0.0, "reward_component_sums": {}}
         self.rng = np.random.default_rng(int(self.config.get("seed", 0)))
         self.stop_queues = {sid: 0 for sid in self.stop_ids}
         self.stop_last_update = {sid: 0.0 for sid in self.stop_ids}
@@ -225,7 +225,8 @@ class EBusDroneEnv:
 
     def _collect_transition_components(self, service: dict, op: dict, bus: dict, st: dict, delivered_ids: list[int], dt_min: float, bus_energy_kwh: float, drone_energy_kwh: float):
         additional_dwell = max(0.0, float(service.get("realized_dwell_min", 0.0)) - float(service.get("passenger_dwell_min", 0.0)))
-        passenger_delay = float(bus.get("onboard_before_service", 0)) * additional_dwell
+        affected_passengers = max(0.0, float(service.get("onboard_after_alighting", 0.0)) + float(service.get("total_board", 0.0)))
+        passenger_delay = affected_passengers * additional_dwell
         late_vals=[]
         for pid in delivered_ids:
             p=self.parcel_states[int(pid)]
@@ -309,7 +310,12 @@ class EBusDroneEnv:
             rc["parcel_lateness"] += terminal_penalty
             rc["total_cost"] += float(self._reward_alphas().get("alpha_2",1.0))*terminal_penalty
             rc["reward"] = -rc["total_cost"]
+            reward = rc["reward"]
             self.episode_metrics["terminal_penalty"] += terminal_penalty
+        sums = self.episode_metrics.setdefault("reward_component_sums", {})
+        for k, v in rc.items():
+            if isinstance(v, (int, float)):
+                sums[k] = float(sums.get(k, 0.0)) + float(v)
         return self._build_obs_for_current_event(), float(reward), terminated, False, {"executed_action_index": ex_idx, "executed_duration": dur, "executed_duration_min": dur / 60.0, "action_repaired": ex_idx != action_index, "termination_reason": reason, "reward_components": rc, "event": e, "unloaded_parcels": unloaded, "unloading_volume_kg": qf, "unloading_duration_min": qf * unloading_time_per_kg_min, "current_trip_id": bus["trip_id"], "current_station_id": st["station_id"], "feasible_action_mask": mask.tolist(), "passenger_service": service, "dwell_components": {"passenger_dwell_min": service.get("passenger_dwell_min", 0.0), "charging_duration_min": dur / 60.0, "unloading_duration_min": qf * unloading_time_per_kg_min, "realized_dwell_min": service.get("realized_dwell_min", 0.0)}, "departure_time_min": dep}
 
     def _build_obs_for_current_event(self):

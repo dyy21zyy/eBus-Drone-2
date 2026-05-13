@@ -1,17 +1,26 @@
 from __future__ import annotations
 
+
+REQUIRED_PAPER_METRICS = [
+    "total_cost","total_reward","onboard_passenger_delay","average_excess_dwell_time",
+    "total_bus_operating_delay","parcel_lateness","late_delivery_count","undelivered_parcel_count",
+    "average_locker_holding_time","terminal_undelivered_penalty","minimum_bus_battery",
+    "battery_safety_violation_count","total_energy_consumption","station_power_overload_amount",
+    "station_power_overload_duration","locker_overflow_amount","locker_overflow_duration",
+    "charger_utilization","drone_battery_stockout_count",
+]
+
+
 def init_metrics():
-    return {k:0.0 for k in [
-        "total_weighted_cost","total_reward","total_passenger_delay","total_parcel_lateness","number_late_deliveries","number_undelivered_parcels","terminal_penalty",
-        "total_energy_kwh","bus_charging_energy_kwh","drone_charging_energy_kwh","power_overload_amount","power_overload_duration",
-        "locker_overflow_amount","locker_overflow_duration","minimum_bus_battery_level","battery_safety_violation_count","charger_utilization",
-        "drone_battery_stockout_count","average_locker_holding_time","average_executed_charging_duration","number_decision_events",
-        "infeasible_actions","repaired_actions","infeasible_action_rate","action_repair_rate","early_termination","selected_dur","executed_dur","steps"
-    ]}
+    m = {k: 0.0 for k in REQUIRED_PAPER_METRICS}
+    m.update({"steps": 0.0, "infeasible_actions": 0.0, "repaired_actions": 0.0, "executed_dur": 0.0})
+    return m
+
 
 def finalize_metrics(m: dict):
-    steps=max(1,int(m.get('steps',0)))
-    m['infeasible_action_rate']=m.get('infeasible_actions',0.0)/steps
-    m['action_repair_rate']=m.get('repaired_actions',0.0)/steps
-    m['average_executed_charging_duration']=m.get('executed_dur',0.0)/steps
+    steps = max(1, int(m.get("steps", 0)))
+    m["average_excess_dwell_time"] = float(m.get("average_excess_dwell_time", 0.0)) / steps
+    m["charger_utilization"] = float(m.get("charger_utilization", 0.0)) / steps
+    m["infeasible_action_rate"] = m.get("infeasible_actions", 0.0) / steps
+    m["action_repair_rate"] = m.get("repaired_actions", 0.0) / steps
     return m
