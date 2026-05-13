@@ -61,9 +61,9 @@ def test_missing_checkpoint_fails_unless_train_if_missing(tmp_path):
 
 def test_export_tables_refuses_missing_metrics(tmp_path, monkeypatch):
     out = tmp_path / 'o'
-    p = out / 'results' / 'benchmark'
+    p = out / 'results' / 'benchmark' / 'small'
     p.mkdir(parents=True)
     (p / 'summary.csv').write_text('method,total_reward\nfoo,1\n', encoding='utf-8')
     monkeypatch.setattr('sys.argv', ['prog', '--mode', 'export_tables', '--config', 'configs/default.yaml', '--output-dir', str(out)])
-    with pytest.raises(KeyError, match='Missing metrics'):
+    with pytest.raises(KeyError, match='Missing required columns|Missing metrics'):
         main()
