@@ -3,8 +3,8 @@ from src.low_level.station_operator import operate_station_step
 
 def _station(idle=2, full=2):
     parcels = {
-        1: {"id": 1, "status": "in_locker", "assigned_station_id": 1, "deadline_min": 8, "T_out": 3, "T_rt": 5, "c_D": 1},
-        2: {"id": 2, "status": "in_locker", "assigned_station_id": 1, "deadline_min": 9, "T_out": 3, "T_rt": 5, "c_D": 2},
+        1: {"id": 1, "parcel_id": 1, "status": "in_locker", "assigned_station_id": 1, "deadline_min": 8, "release_time_min": 0.0, "T_out_min": 3, "T_rt_min": 5, "drone_cost": 1, "weight_kg": 1.0},
+        2: {"id": 2, "parcel_id": 2, "status": "in_locker", "assigned_station_id": 1, "deadline_min": 9, "release_time_min": 0.0, "T_out_min": 3, "T_rt_min": 5, "drone_cost": 2, "weight_kg": 2.0},
     }
     return {
         "station_id": 1,
@@ -17,6 +17,7 @@ def _station(idle=2, full=2):
         "charging_batteries": [],
         "P_capacity": 100,
         "P_bat": 10,
+        "locker_inventory_kg": 3.0,
     }, parcels
 
 
@@ -39,3 +40,22 @@ def test_dispatch_updates_locker_and_battery_and_count():
     assert len(s["locker_parcels"]) == 0
     assert s["full_batteries"] == 0
     assert parcels[1]["status"] == "assigned_to_drone"
+    assert parcels[1]["pickup_time_min"] == 0
+    assert parcels[1]["delivery_completion_time_min"] == 3
+    assert parcels[1]["drone_return_time_min"] == 5
+
+
+def test_drone_return_adds_depleted_battery():
+    s, parcels = _station(idle=1, full=1)
+    operate_station_step(s, 0, parcel_states=parcels, p_e=10, p_l=10, new_parcels=True)
+    assert s["depleted_batteries"] == 0
+    operate_station_step(s, 5, parcel_states=parcels, p_e=10, p_l=10, new_parcels=False)
+    assert s["depleted_batteries"] + len(s.get("charging_batteries", [])) >= 1
+
+
+def test_not_dispatch_if_not_released():
+    s, parcels = _station(idle=1, full=1)
+    parcels[1]["status"] = "onboard"
+    r = operate_station_step(s, 0, parcel_states=parcels, p_e=10, p_l=10, new_parcels=True)
+    assert r["n_disp"] == 1
+    assert parcels[1]["status"] == "onboard"

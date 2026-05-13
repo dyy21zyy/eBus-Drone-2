@@ -71,9 +71,27 @@ class EBusDroneEnv:
             self.station_states[sid] = {"station_id": sid, "charger_release_times_min": [0.0] * n_ch, "locker_parcels": [], "locker_parcel_ids": [], "locker_inventory_kg": 0.0, "locker_capacity_kg": float(s["locker_capacity_kg"]), "idle_drone_ids": [f"s{sid}_d{j}" for j in range(int(s["drones"]))], "active_drone_missions": [], "full_batteries": int(s["initial_fully_charged_batteries"]), "depleted_batteries": int(s["initial_depleted_batteries"]), "batteries_charging": [], "station_base_load": lambda _t: 50.0, "current_bus_charging_load": 0.0, "current_drone_battery_charging_load": 0.0, "power_capacity_kw": float(s["station_power_capacity_kw"]), "charging_slots": n_ch, "G_max": n_ch, "P_capacity": float(s["station_power_capacity_kw"]), "drones": [{"drone_id": f"s{sid}_d{j}", "status": "idle"} for j in range(int(s["drones"]))], "battery_charge_duration_min": 10.0}
 
         self.parcel_states = {}
-        weights = {int(c["customer_id"]): float(c["parcel_weight_kg"]) for c in self.instance.get("customers", [])}
+        customers = {int(c["customer_id"]): c for c in self.instance.get("customers", [])}
         for cid, t_id in self.assignment_index.get("by_customer", {}).items():
-            self.parcel_states[cid] = {"parcel_id": cid, "id": cid, "customer_id": cid, "weight_kg": weights.get(cid, 1.0), "status": "onboard", "current_trip_id": int(t_id), "assigned_trip_id": int(t_id), "assigned_station_id": int(self.assignment_index["station_by_customer"][cid]), "deadline_min": self.horizon, "T_out": 5.0, "T_rt": 10.0}
+            c = customers.get(int(cid), {})
+            assigned_station = int(self.assignment_index["station_by_customer"][cid])
+            option = next((o for o in c.get("feasible_stations", []) if int(o["station_id"]) == assigned_station), None)
+            if option is None:
+                raise ValueError(f"Missing feasible station option for customer {cid} at station {assigned_station}")
+            rt_min = float(option["mission_duration_min"])
+            out_min = 0.5 * (rt_min - float(self.instance["drone"]["customer_service_time_min"]) - float(self.instance["drone"]["turnaround_time_min"]))
+            self.parcel_states[cid] = {
+                "parcel_id": int(cid), "id": int(cid), "customer_id": int(cid),
+                "weight_kg": float(c.get("parcel_weight_kg", 0.0)),
+                "delivery_deadline_min": float(c.get("delivery_deadline_min", self.horizon)),
+                "deadline_min": float(c.get("delivery_deadline_min", self.horizon)),
+                "assigned_trip_id": int(t_id), "assigned_station_id": assigned_station,
+                "status": "onboard", "release_time_min": None, "pickup_time_min": None,
+                "delivery_completion_time_min": None, "drone_return_time_min": None,
+                "locker_holding_time_min": None, "T_out_min": out_min, "T_rt_min": rt_min,
+                "T_out": out_min, "T_rt": rt_min,
+                "drone_cost": float(self.instance["parcel"]["cost"]["drone_per_km"]) * float(option["distance_km"]),
+            }
 
         self.delivered_parcels = set()
         self.state = {"time": 0.0, "horizon": self.horizon, "trip_location": 0, "battery": cap, "battery_max": cap, "onboard_passengers": 0, "onboard_parcels": 0, "queue": 0, "locker": 0, "idle_drones": 0, "full_batteries": 0, "station_power": 0.0, "power_margin": 0.0, "available_chargers": 0, "parcel_urgency": 0.0, "calendar_len": len(self.calendar), "charge_power_kw": float(self.instance["charging"]["pantograph_power_kw"]), "charge_efficiency": float(self.instance["charging"].get("charger_efficiency", 0.95)), "travel_energy_kwh_per_km": float(self.instance["bus"]["energy_kwh_per_km"]), "travel_distance_km": float(self.instance["network"].get("interstop_distance_km", 1.0)), "trip_id": 0}
