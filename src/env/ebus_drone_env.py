@@ -147,20 +147,30 @@ class EBusDroneEnv:
         rate = float(self.scenario.get("passenger", {}).get("arrival_rate_per_stop_per_min", {}).get(str(stop_id), self.scenario.get("passenger", {}).get("arrival_rate_per_stop_per_min", {}).get(stop_id, 0.0)))
         al_p = float(self.scenario.get("passenger", {}).get("alighting_probability", 0.0))
         elapsed = max(0.0, float(e.time) - float(self.stop_last_update.get(stop_id, 0.0)))
-        self.stop_queues[stop_id] += sample_poisson_arrivals(rate, elapsed, self.rng)
-        self.stop_last_update[stop_id] = float(e.time)
-        service = simulate_passenger_service_at_stop(queue=self.stop_queues[stop_id], onboard=bus["onboard_passengers"], capacity=bus["passenger_capacity"], alighting_probability=al_p, rate_per_min=rate, rho_al_min_per_pax=1.5/60.0, rho_bo_min_per_pax=3.0/60.0, parcel_unloading_time_min=0.0, charging_duration_min=0.0, rng=self.rng)
-        bus["onboard_passengers"] = service["onboard_final"]
-        self.stop_queues[stop_id] = service["queue_final"]
-        pax_required = bool(service["chi"])
+        arrivals = sample_poisson_arrivals(rate, elapsed, self.rng)
+        queue_at_arrival = self.stop_queues[stop_id] + arrivals
+        onboard_at_arrival = int(bus["onboard_passengers"])
+        service_preview = simulate_passenger_service_at_stop(queue=queue_at_arrival, onboard=onboard_at_arrival, capacity=bus["passenger_capacity"], alighting_probability=al_p, rate_per_min=rate, rho_al_min_per_pax=1.5/60.0, rho_bo_min_per_pax=3.0/60.0, parcel_unloading_time_min=0.0, charging_duration_min=0.0, rng=self.rng)
+        pax_required = bool(service_preview["chi"])
         requires_stop = pax_required or parcel_required
 
         if requires_stop and integrated:
             e.station_id, e.integrated, e.passengers_required, e.parcel_required, e.requires_stop, e.is_decision = station_id, True, pax_required, parcel_required, True, True
-            e.passenger_service = service
+            e.passenger_service_preview = service_preview
+            e.arrival_queue_before_preview = int(queue_at_arrival)
+            e.arrival_onboard_before_preview = int(onboard_at_arrival)
+            e.unloading_volume_kg = compute_unloading_volume(parcel_ids, self.parcel_states)
             return True
 
-        dwell = service["realized_dwell_min"] if requires_stop else 0.0
+        if requires_stop:
+            bus["onboard_passengers"] = service_preview["onboard_final"]
+            self.stop_queues[stop_id] = service_preview["queue_final"]
+            self.stop_last_update[stop_id] = float(e.time) + float(service_preview["realized_dwell_min"])
+            dwell = service_preview["realized_dwell_min"]
+        else:
+            self.stop_queues[stop_id] = int(queue_at_arrival)
+            self.stop_last_update[stop_id] = float(e.time)
+            dwell = 0.0
         dep = e.time + dwell
         if idx + 1 < len(self.stop_ids):
             next_t = dep + float(self.travel_times[idx + 1] - self.travel_times[idx])
@@ -223,18 +233,19 @@ class EBusDroneEnv:
 
         unload_ids = get_unloading_parcels(bus["trip_id"], st["station_id"], self.assignment_index, self.parcel_states)
         qf = compute_unloading_volume(unload_ids, self.parcel_states)
-        unloaded = unload_parcels_to_locker(bus, st, self.parcel_states, unload_ids, self.state["time"]) if unload_ids else []
+        unloading_time_per_kg_min = float(self.instance.get("parcel", {}).get("unloading_time_sec_per_kg", 30.0)) / 60.0
         stop_id = self.stop_ids[int(e.stop_index)]
         rate = float(self.scenario.get("passenger", {}).get("arrival_rate_per_stop_per_min", {}).get(str(stop_id), self.scenario.get("passenger", {}).get("arrival_rate_per_stop_per_min", {}).get(stop_id, 0.0)))
         al_p = float(self.scenario.get("passenger", {}).get("alighting_probability", 0.0))
-        elapsed = max(0.0, float(self.state["time"]) - float(self.stop_last_update.get(stop_id, 0.0)))
-        self.stop_queues[stop_id] += sample_poisson_arrivals(rate, elapsed, self.rng)
-        self.stop_last_update[stop_id] = float(self.state["time"])
         bus["onboard_before_service"] = bus["onboard_passengers"]
         bus["battery_before_step"] = bus["battery_kwh"]
-        service = simulate_passenger_service_at_stop(queue=self.stop_queues[stop_id], onboard=bus["onboard_passengers"], capacity=bus["passenger_capacity"], alighting_probability=al_p, rate_per_min=rate, rho_al_min_per_pax=1.5/60.0, rho_bo_min_per_pax=3.0/60.0, parcel_unloading_time_min=qf*0.5, charging_duration_min=dur/60.0, rng=self.rng)
+        queue_for_service = int(getattr(e, "arrival_queue_before_preview", self.stop_queues[stop_id]))
+        onboard_for_service = int(getattr(e, "arrival_onboard_before_preview", bus["onboard_passengers"]))
+        service = simulate_passenger_service_at_stop(queue=queue_for_service, onboard=onboard_for_service, capacity=bus["passenger_capacity"], alighting_probability=al_p, rate_per_min=rate, rho_al_min_per_pax=1.5/60.0, rho_bo_min_per_pax=3.0/60.0, parcel_unloading_time_min=qf * unloading_time_per_kg_min, charging_duration_min=dur/60.0, rng=self.rng)
         bus["onboard_passengers"] = service["onboard_final"]
         self.stop_queues[stop_id] = service["queue_final"]
+        self.stop_last_update[stop_id] = float(self.state["time"]) + float(service["realized_dwell_min"])
+        unloaded = unload_parcels_to_locker(bus, st, self.parcel_states, unload_ids, self.state["time"] + service["realized_dwell_min"]) if unload_ids else []
 
         dep = self.state["time"] + service["realized_dwell_min"]
         idx = int(e.stop_index)
@@ -252,9 +263,10 @@ class EBusDroneEnv:
         op = operate_station_step(st, dep, parcel_states=self.parcel_states, delivered_parcels=self.delivered_parcels, p_e=p_e, p_l=p_l, new_parcels=bool(unloaded))
         self.event_log.append({"time_min": self.state["time"], "bus_id": bus["trip_id"], "station_id": st["station_id"], "action_sec": dur, "dwell_time_min": service["realized_dwell_min"], "passenger_delay": float(service["total_board"]), "parcel_unloading_kg": qf, "battery_before": before, "battery_after_charge": apply_charge(before, dur, self.state["charge_power_kw"], self.state["charge_efficiency"], bus["battery_capacity_kwh"]), "available_chargers_before": av_before, "station_power_overload": float(op["power"].get("overload", 0.0))})
 
+        prev_time = float(self.state.get("time", dep))
         self.state.update({"time": dep, "trip_id": bus["trip_id"], "trip_location": idx, "battery": bus["battery_kwh"], "battery_max": bus["battery_capacity_kwh"], "onboard_passengers": bus["onboard_passengers"], "onboard_parcels": len(bus["onboard_parcel_ids"]), "locker": int(st["locker_inventory_kg"]), "idle_drones": sum(1 for d in st.get("drones", []) if d.get("status") == "idle"), "full_batteries": st.get("full_batteries", 0), "station_power": op["P_tot"], "power_margin": st["power_capacity_kw"] - op["P_tot"], "available_chargers": self._available_chargers(st, dep), "calendar_len": len(self.calendar)})
         st.setdefault("power_overload_amount_prev", 0.0); st.setdefault("power_overload_duration_prev", 0.0)
-        dt_min=max(0.0, dep-float(self.state.get("time",dep)))
+        dt_min=max(0.0, dep-prev_time)
         bus_e = float(op.get("metrics",{}).get("bus_charging_energy_kwh",0.0)) - float(st.get("bus_charging_energy_prev",0.0))
         drone_e = float(op.get("metrics",{}).get("drone_charging_energy_kwh",0.0)) - float(st.get("drone_charging_energy_prev",0.0))
         comp = self._collect_transition_components(service, op, bus, st, op.get("delivered_parcel_ids", []), dt_min, bus_e, drone_e)
@@ -270,7 +282,7 @@ class EBusDroneEnv:
             rc["total_cost"] += float(self._reward_alphas().get("alpha_2",1.0))*terminal_penalty
             rc["reward"] = -rc["total_cost"]
             self.episode_metrics["terminal_penalty"] += terminal_penalty
-        return self._build_obs_for_current_event(), float(reward), terminated, False, {"executed_action_index": ex_idx, "executed_duration": dur, "action_repaired": ex_idx != action_index, "termination_reason": reason, "reward_components": rc, "unloaded_parcels": unloaded, "unloading_volume_kg": qf, "current_trip_id": bus["trip_id"], "current_station_id": st["station_id"]}
+        return self._build_obs_for_current_event(), float(reward), terminated, False, {"executed_action_index": ex_idx, "executed_duration": dur, "executed_duration_min": dur / 60.0, "action_repaired": ex_idx != action_index, "termination_reason": reason, "reward_components": rc, "event": e, "unloaded_parcels": unloaded, "unloading_volume_kg": qf, "unloading_duration_min": qf * unloading_time_per_kg_min, "current_trip_id": bus["trip_id"], "current_station_id": st["station_id"], "feasible_action_mask": mask.tolist(), "passenger_service": service, "dwell_components": {"passenger_dwell_min": service.get("passenger_dwell_min", 0.0), "charging_duration_min": dur / 60.0, "unloading_duration_min": qf * unloading_time_per_kg_min, "realized_dwell_min": service.get("realized_dwell_min", 0.0)}, "departure_time_min": dep}
 
     def _build_obs_for_current_event(self):
         e = self.current_decision_event
@@ -279,5 +291,6 @@ class EBusDroneEnv:
             return build_observation(self.state, local)
         bus = self.bus_states[int(e.trip_id)]; st = self.station_states[int(e.station_id)]
         unload_ids = get_unloading_parcels(bus["trip_id"], st["station_id"], self.assignment_index, self.parcel_states)
-        local = {"station_id": st["station_id"], "trip_id": bus["trip_id"], "arriving_battery": bus["battery_kwh"], "onboard_before_alight": bus["onboard_passengers"], "onboard_parcels_before_unload": len(bus["onboard_parcel_ids"]), "onboard_parcel_weight_before_unload": sum(self.parcel_states[p]["weight_kg"] for p in bus["onboard_parcel_ids"] if p in self.parcel_states), "alighting": 0, "initial_board": 0, "q_f": compute_unloading_volume(unload_ids, self.parcel_states), "num_unloading_parcels": len(unload_ids), "available_chargers": self._available_chargers(st, self.state["time"]), "locker": st["locker_inventory_kg"], "idle_drones": sum(1 for d in st.get("drones", []) if d.get("status") == "idle"), "full_batteries": st.get("full_batteries", 0), "power_margin": st["power_capacity_kw"] - st.get("current_bus_charging_load", 0.0), "delivery_urgency": self.state.get("parcel_urgency", 0.0)}
+        preview = getattr(e, "passenger_service_preview", {}) or {}
+        local = {"station_id": st["station_id"], "trip_id": bus["trip_id"], "arriving_battery": bus["battery_kwh"], "onboard_before_alight": bus["onboard_passengers"], "onboard_parcels_before_unload": len(bus["onboard_parcel_ids"]), "onboard_parcel_weight_before_unload": sum(self.parcel_states[p]["weight_kg"] for p in bus["onboard_parcel_ids"] if p in self.parcel_states), "alighting": int(preview.get("alighting", 0)), "initial_board": int(preview.get("initial_board", 0)), "q_f": compute_unloading_volume(unload_ids, self.parcel_states), "num_unloading_parcels": len(unload_ids), "available_chargers": self._available_chargers(st, self.state["time"]), "locker": st["locker_inventory_kg"], "idle_drones": sum(1 for d in st.get("drones", []) if d.get("status") == "idle"), "full_batteries": st.get("full_batteries", 0), "power_margin": st["power_capacity_kw"] - st.get("current_bus_charging_load", 0.0), "delivery_urgency": self.state.get("parcel_urgency", 0.0)}
         return build_observation(self.state, local)
