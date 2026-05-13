@@ -72,8 +72,9 @@ def build_assignment_data(instance: dict) -> AssignmentData:
             feasible.add(h)
             feasible_customers_by_station[h].append(i)
             d = float(option["distance_km"])
+            outbound = float(option["outbound_with_service_time_min"])
             rt = float(option["mission_duration_min"])
-            t_hi_out[(h, i)] = 0.5 * (rt - float(instance["drone"]["customer_service_time_min"]) - float(instance["drone"]["turnaround_time_min"]))
+            t_hi_out[(h, i)] = outbound
             t_hi_rt[(h, i)] = rt
             c_d[(h, i)] = drone_cost_km * d
         feasible_stations_by_customer[i] = feasible

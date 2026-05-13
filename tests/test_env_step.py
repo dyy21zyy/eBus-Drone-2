@@ -22,6 +22,7 @@ def test_env_uses_loaded_generated_data():
 
 def test_cli_eval_loads_real_data_path(monkeypatch):
     from src import main as main_mod
+    from src.utils.config import load_yaml
     called = {"value": False}
 
     def _fake_env(**kwargs):
@@ -36,6 +37,9 @@ def test_cli_eval_loads_real_data_path(monkeypatch):
     monkeypatch.setattr(main_mod, "EBusDroneEnv", _fake_env)
     monkeypatch.setattr(main_mod, "evaluate_policy", lambda *args, **kwargs: {"ok": True})
     monkeypatch.setattr(main_mod, "build_policy", lambda method: object())
+    cfg = load_yaml("configs/default.yaml")
+    main_mod.run_generate(cfg, "small", 1)
+    main_mod.run_offline(cfg, "small", 1)
     import sys
     sys.argv = ["prog", "--mode", "eval", "--config", "configs/default.yaml", "--instance", "small", "--method", "no_charging", "--seed", "1", "--smoke-test"]
     main_mod.main()

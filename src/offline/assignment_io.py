@@ -6,10 +6,13 @@ from pathlib import Path
 from src.offline.assignment_result import AssignmentResult
 
 
-def write_assignment(result: AssignmentResult, path: str) -> None:
+def write_assignment(result: AssignmentResult, path: str, metadata: dict | None = None) -> None:
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
+    payload = result.to_dict()
+    if metadata:
+        payload["metadata"] = {**(payload.get("metadata") or {}), **metadata}
+    p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def read_assignment(path: str) -> AssignmentResult:

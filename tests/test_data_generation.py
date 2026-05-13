@@ -3,6 +3,7 @@ from pathlib import Path
 from src.utils.config import load_yaml
 from src.data_generation.scenario_generator import generate_instance, generate_scenario
 from src.offline.assignment_data_builder import build_assignment_data
+from src.main import run_generate
 
 
 def test_instance_constraints():
@@ -17,6 +18,8 @@ def test_instance_constraints():
 
 
 def test_generate_command_outputs():
+    cfg = load_yaml('configs/default.yaml')
+    run_generate(cfg, "small", 1)
     out = Path('data/generated/small')
     assert (out / 'instance_seed_1.json').exists()
     assert (out / 'scenario_0_seed_1.json').exists()
