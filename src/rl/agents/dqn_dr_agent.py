@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import random
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -12,15 +13,22 @@ from src.rl.replay_buffer import ReplayBuffer
 
 class DQNDRAgent:
     def __init__(self, obs_dim: int, action_dim: int, cfg: dict):
-        self.cfg = cfg
-        self.action_dim = action_dim
-        device = cfg.get("device", "auto")
-        self.device = torch.device("cuda" if device == "auto" and torch.cuda.is_available() else device if device != "auto" else "cpu")
-        hidden = cfg.get("hidden_layers", [128, 128])
-        self.online = build_network(obs_dim, action_dim, dueling=False, hidden_dims=hidden).to(self.device)
+        self.cfg = dict(cfg)
+        self.action_dim = int(action_dim)
+        device_cfg = self.cfg.get("device", "auto")
+        if device_cfg == "auto":
+            resolved = "cuda" if torch.cuda.is_available() else "cpu"
+        elif device_cfg == "cuda" and not torch.cuda.is_available():
+            raise RuntimeError("Requested device='cuda' but CUDA is not available.")
+        else:
+            resolved = device_cfg
+        self.device = torch.device(resolved)
+
+        hidden = self.cfg.get("hidden_layers", [128, 128])
+        self.online = build_network(obs_dim, self.action_dim, dueling=False, hidden_dims=hidden).to(self.device)
         self.target = copy.deepcopy(self.online)
-        self.optim = torch.optim.Adam(self.online.parameters(), lr=float(cfg.get("learning_rate", cfg.get("lr", 1e-3))))
-        self.buffer = ReplayBuffer(int(cfg.get("replay_buffer_size", cfg.get("capacity", 5000))))
+        self.optim = torch.optim.Adam(self.online.parameters(), lr=float(self.cfg.get("learning_rate", self.cfg.get("lr", 1e-3))))
+        self.buffer = ReplayBuffer(int(self.cfg.get("replay_buffer_size", self.cfg.get("capacity", 5000))))
         self.steps = 0
 
     def _eps(self):
@@ -30,14 +38,32 @@ class DQNDRAgent:
         p = min(1.0, self.steps / d)
         return float(s + p * (e - s))
 
+    def _mask_tensor(self, action_mask):
+        if action_mask is None:
+            m = torch.ones(self.action_dim, dtype=torch.float32, device=self.device)
+        else:
+            m = torch.as_tensor(np.asarray(action_mask), dtype=torch.float32, device=self.device)
+        if m.numel() != self.action_dim:
+            raise ValueError(f"Action mask dim {m.numel()} does not match action_dim={self.action_dim}")
+        if torch.all(m <= 0):
+            m = m.clone(); m[0] = 1.0
+        return m
+
+    def _feasible_indices(self, action_mask):
+        m = self._mask_tensor(action_mask)
+        return torch.where(m > 0)[0].detach().cpu().tolist()
+
     def select_action(self, observation, action_mask, training=True) -> int:
-        if not isinstance(training, bool):
-            training = False
-        if training and random.random() < self._eps():
-            return random.randrange(self.action_dim)
+        feasible = self._feasible_indices(action_mask)
+        if bool(training) and random.random() < self._eps():
+            return int(random.choice(feasible))
         with torch.no_grad():
-            q = self.online(torch.tensor(np.asarray(observation), dtype=torch.float32, device=self.device).unsqueeze(0))[0]
+            q = self.online(torch.as_tensor(np.asarray(observation), dtype=torch.float32, device=self.device).unsqueeze(0))[0]
+            m = self._mask_tensor(action_mask)
+            q = q.masked_fill(m <= 0, -1e9)
         return int(torch.argmax(q).item())
+
+    act = select_action
 
     def observe(self, *args, **kwargs):
         self.buffer.add(*args, **kwargs)
@@ -62,9 +88,13 @@ class DQNDRAgent:
         rew = torch.tensor([t.reward for t in b], dtype=torch.float32, device=self.device)
         nxt = torch.tensor(np.stack([t.next_observation for t in b]), dtype=torch.float32, device=self.device)
         done = torch.tensor([t.done for t in b], dtype=torch.float32, device=self.device)
+        nmask = torch.tensor(np.stack([t.next_action_mask for t in b]), dtype=torch.float32, device=self.device)
+        nmask[:, 0] = 1.0
+
         q = self.online(obs).gather(1, act.unsqueeze(1)).squeeze(1)
         with torch.no_grad():
-            y = rew + (1 - done) * float(self.cfg.get("gamma", 0.99)) * self.target(nxt).max(dim=1).values
+            q_next = self.target(nxt).masked_fill(nmask <= 0, -1e9).max(dim=1).values
+            y = rew + (1 - done) * float(self.cfg.get("gamma", 0.99)) * q_next
         loss = F.mse_loss(q, y)
         self.optim.zero_grad()
         loss.backward()
@@ -81,6 +111,7 @@ class DQNDRAgent:
             "optimizer": self.optim.state_dict(),
             "steps": self.steps,
             "config": self.cfg,
+            "action_dim": self.action_dim,
             "action_set": self.cfg.get("action_set_seconds"),
             "normalization": self.cfg.get("normalization", {}),
         }
@@ -95,3 +126,4 @@ class DQNDRAgent:
         if "optimizer" in ck:
             self.optim.load_state_dict(ck["optimizer"])
         self.steps = int(ck.get("steps", 0))
+        self.action_dim = int(ck.get("action_dim", self.action_dim))

@@ -20,7 +20,8 @@ class AMDuelingDDQNDRAgent(AMDDQNDRAgent):
         with torch.no_grad():
             obs = torch.tensor(np.asarray(observation), dtype=torch.float32, device=self.device).unsqueeze(0)
             m = torch.tensor(np.asarray(action_mask), dtype=torch.float32, device=self.device).unsqueeze(0)
-            m[:, 0] = 1.0
+            if torch.all(m <= 0):
+                m[:, 0] = 1.0
             q = self.online(obs, m)[0].masked_fill(m[0] <= 0, -1e9)
         return int(torch.argmax(q).item())
 
@@ -33,9 +34,15 @@ class AMDuelingDDQNDRAgent(AMDDQNDRAgent):
         rew = torch.tensor([t.reward for t in b], dtype=torch.float32, device=self.device)
         nxt = torch.tensor(np.stack([t.next_observation for t in b]), dtype=torch.float32, device=self.device)
         nmask = torch.tensor(np.stack([t.next_action_mask for t in b]), dtype=torch.float32, device=self.device)
-        nmask[:, 0] = 1.0
+        nmask = nmask.clone()
+        all_zero = torch.all(nmask <= 0, dim=1)
+        nmask[all_zero, 0] = 1.0
         done = torch.tensor([t.done for t in b], dtype=torch.float32, device=self.device)
-        q = self.online(obs, None).gather(1, act.unsqueeze(1)).squeeze(1)
+        cmask = torch.tensor(np.stack([t.action_mask for t in b]), dtype=torch.float32, device=self.device)
+        cmask = cmask.clone()
+        all_zero_c = torch.all(cmask <= 0, dim=1)
+        cmask[all_zero_c, 0] = 1.0
+        q = self.online(obs, cmask).gather(1, act.unsqueeze(1)).squeeze(1)
         with torch.no_grad():
             q_on = self.online(nxt, nmask).masked_fill(nmask <= 0, -1e9)
             a_next = q_on.argmax(dim=1)
