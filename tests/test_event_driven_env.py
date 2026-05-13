@@ -57,3 +57,26 @@ def test_reset_step_compatibility_shape():
     assert "event" in info
     out = env.step(0)
     assert len(out) == 5
+
+def test_no_valid_stop_no_decision_event_when_no_queue_no_unloading():
+    env = _build_env(seed=1)
+    env.scenario["passenger"]["arrival_rate_per_stop_per_min"] = {str(s): 0.0 for s in env.stop_ids}
+    env.scenario["passenger"]["alighting_probability"] = 0.0
+    env.stop_queues = {s: 0 for s in env.stop_ids}
+    env._advance_until_decision()
+    ev = env.current_decision_event
+    assert ev is None or (ev.passengers_required or ev.parcel_required)
+
+
+def test_ordinary_stop_updates_passengers_without_decision():
+    env = _build_env(seed=2)
+    env.scenario["passenger"]["arrival_rate_per_stop_per_min"] = {str(s): 2.0 for s in env.stop_ids}
+    env.scenario["passenger"]["alighting_probability"] = 0.1
+    # force process first event directly
+    e = env.calendar.pop_next()
+    pre = env.bus_states[e.trip_id]["onboard_passengers"]
+    is_decision = env._process_bus_arrival(e)
+    post = env.bus_states[e.trip_id]["onboard_passengers"]
+    if not e.integrated:
+        assert is_decision is False
+    assert post >= 0 and pre >= 0

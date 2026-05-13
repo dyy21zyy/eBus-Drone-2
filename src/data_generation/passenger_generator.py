@@ -22,9 +22,11 @@ def generate_passenger_scenario(config: dict, stops: list[dict], seed: int) -> d
     base = generate_passenger_parameters(config, stops, seed)["baseline_arrival_rate_per_stop_per_min"]
     factor = float(config["passenger"]["demand_intensity_factor"])
     almin, almax = float(config["passenger"]["alighting_probability_min"]), float(config["passenger"]["alighting_probability_max"])
+    rates = {}
     series = {}
     for s in stops:
-        lam = base[s["stop_id"]] * factor
+        lam = max(base[s["stop_id"]] * factor, 0.0)
+        rates[s["stop_id"]] = lam
         arrivals = [1 if rng.random() < min(lam, 1.0) else 0 for _ in range(horizon)]
         series[s["stop_id"]] = arrivals
-    return {"passenger_arrivals": series, "alighting_probability": round(rng.uniform(almin, almax), 4)}
+    return {"passenger_arrivals": series, "arrival_rate_per_stop_per_min": rates, "alighting_probability": round(rng.uniform(almin, almax), 4)}
