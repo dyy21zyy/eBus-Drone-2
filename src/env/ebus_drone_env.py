@@ -231,23 +231,59 @@ class EBusDroneEnv:
     def _reward_alphas(self) -> dict:
         return self.config.get("reward", {"alpha_1": 0.01, "alpha_2": 1.0, "alpha_3": 1.0, "alpha_4": 1.0, "alpha_5": 1.0, "alpha_6": 1.0})
 
-    def _collect_transition_components(self, service: dict, op: dict, bus: dict, st: dict, delivered_ids: list[int], dt_min: float, bus_energy_kwh: float, drone_energy_kwh: float):
-        additional_dwell = max(0.0, float(service.get("realized_dwell_min", 0.0)) - float(service.get("passenger_dwell_min", 0.0)))
-        affected_passengers = max(0.0, float(service.get("onboard_after_alighting", 0.0)) + float(service.get("total_board", 0.0)))
-        passenger_delay = affected_passengers * additional_dwell
-        late_vals=[]
-        for pid in delivered_ids:
-            p=self.parcel_states[int(pid)]
-            completion=float(p.get("delivery_completion_time_min"))
-            deadline=float(p.get("delivery_deadline_min", p.get("deadline_min", completion)))
-            late_vals.append(max(0.0, completion-deadline))
-        parcel_lateness=float(sum(late_vals))
-        energy_coeff=float(self.config.get("reward", {}).get("energy_cost_per_kwh", 1.0))
-        power_overload_amount=float(st.get("power_overload_amount_kw_min",0.0))-float(st.get("power_overload_amount_prev",0.0))
-        locker_overflow=max(0.0, float(st["locker_inventory_kg"])-float(st["locker_capacity_kg"])) * float(dt_min)
-        min_battery=min(float(bus.get("battery_before_step", bus["battery_kwh"])), float(bus["battery_kwh"]))
-        battery_safety=max(0.0, float(bus["safety_battery_kwh"])-min_battery)
-        return {"passenger_delay":passenger_delay,"parcel_lateness":parcel_lateness,"energy_cost":energy_coeff*(bus_energy_kwh+drone_energy_kwh),"power_overload":power_overload_amount,"battery_safety":battery_safety,"locker_overflow":locker_overflow,"terminal_penalty":0.0,"bus_charging_energy_kwh":bus_energy_kwh,"drone_charging_energy_kwh":drone_energy_kwh,"total_energy_kwh":bus_energy_kwh+drone_energy_kwh,"number_late_deliveries":sum(1 for v in late_vals if v>0),"power_overload_duration": float(st.get("power_overload_duration_min",0.0))-float(st.get("power_overload_duration_prev",0.0)),"locker_overflow_amount":max(0.0, float(st["locker_inventory_kg"])-float(st["locker_capacity_kg"])),"locker_overflow_duration": float(dt_min if float(st["locker_inventory_kg"])>float(st["locker_capacity_kg"]) else 0.0)}
+
+    def _snapshot_cumulative_metrics(self) -> dict:
+        delivered = [p for p in self.parcel_states.values() if p.get("status") == "delivered" and p.get("delivery_completion_time_min") is not None]
+        parcel_lateness = sum(max(0.0, float(p["delivery_completion_time_min"]) - float(p.get("delivery_deadline_min", p.get("deadline_min", p["delivery_completion_time_min"])))) for p in delivered)
+        energy_bus = sum(float(st.get("bus_charging_energy_kwh", 0.0)) for st in self.station_states.values())
+        energy_drone = sum(float(st.get("drone_charging_energy_kwh", 0.0)) for st in self.station_states.values())
+        power_overload = sum(float(st.get("power_overload_amount_kw_min", 0.0)) for st in self.station_states.values())
+        locker_overflow = sum(float(st.get("locker_overflow_amount_kg_min", 0.0)) for st in self.station_states.values())
+        power_overload_duration = sum(float(st.get("power_overload_duration_min", 0.0)) for st in self.station_states.values())
+        locker_overflow_duration = sum(float(st.get("locker_overflow_duration_min", 0.0)) for st in self.station_states.values())
+        locker_overflow_amount = sum(float(st.get("locker_overflow_amount_kg", 0.0)) for st in self.station_states.values())
+        return {
+            "passenger_delay": sum(float(b.get("accumulated_delay_min", 0.0)) for b in self.bus_states.values()),
+            "parcel_lateness": float(parcel_lateness),
+            "energy_consumption": float(energy_bus + energy_drone),
+            "power_overload": float(power_overload),
+            "battery_violation": sum(max(0.0, float(b.get("safety_battery_kwh", 0.0)) - float(b.get("battery_kwh", 0.0))) for b in self.bus_states.values()),
+            "locker_overflow": float(locker_overflow),
+            "bus_charging_energy_kwh": float(energy_bus),
+            "drone_charging_energy_kwh": float(energy_drone),
+            "power_overload_duration": float(power_overload_duration),
+            "locker_overflow_duration": float(locker_overflow_duration),
+            "locker_overflow_amount": float(locker_overflow_amount),
+        }
+
+    def _build_transition_reward(self, before: dict, after: dict, terminal_penalty: float) -> tuple[float, dict]:
+        required = ["passenger_delay", "parcel_lateness", "energy_consumption", "power_overload", "battery_violation", "locker_overflow"]
+        missing = [k for k in required if k not in before or k not in after]
+        if missing:
+            raise ValueError(f"Missing cumulative metrics for reward delta: {missing}")
+        passenger_delta = float(after["passenger_delay"] - before["passenger_delay"])
+        parcel_delta = float(after["parcel_lateness"] - before["parcel_lateness"])
+        energy_delta = float(after["energy_consumption"] - before["energy_consumption"])
+        power_delta = float(after["power_overload"] - before["power_overload"])
+        battery_delta = float(after["battery_violation"] - before["battery_violation"])
+        locker_delta = float(after["locker_overflow"] - before["locker_overflow"])
+        components = {
+            "passenger_delay": passenger_delta,
+            "parcel_lateness": parcel_delta + float(terminal_penalty),
+            "energy_cost": energy_delta,
+            "power_overload": power_delta,
+            "battery_safety": battery_delta,
+            "locker_overflow": locker_delta,
+            "terminal_penalty": float(terminal_penalty),
+            "bus_charging_energy_kwh": float(after["bus_charging_energy_kwh"] - before["bus_charging_energy_kwh"]),
+            "drone_charging_energy_kwh": float(after["drone_charging_energy_kwh"] - before["drone_charging_energy_kwh"]),
+            "total_energy_kwh": energy_delta,
+            "power_overload_duration": float(after["power_overload_duration"] - before["power_overload_duration"]),
+            "locker_overflow_duration": float(after["locker_overflow_duration"] - before["locker_overflow_duration"]),
+            "locker_overflow_amount": float(after["locker_overflow_amount"] - before["locker_overflow_amount"]),
+            "number_late_deliveries": 0.0,
+        }
+        return compute_reward(components, self._reward_alphas())
 
     def step(self, action_index):
         e = self.current_decision_event
@@ -300,31 +336,23 @@ class EBusDroneEnv:
         op = operate_station_step(st, dep, parcel_states=self.parcel_states, delivered_parcels=self.delivered_parcels, p_e=p_e, p_l=p_l, new_parcels=bool(unloaded), dispatch_interval=float(st.get("dispatch_interval_min", 5.0)), max_round_trip_duration=float(st.get("max_round_trip_duration_min", 1e9)))
         self.event_log.append({"time_min": self.state["time"], "bus_id": bus["trip_id"], "station_id": st["station_id"], "action_sec": dur, "dwell_time_min": service["realized_dwell_min"], "passenger_delay": float(service["total_board"]), "parcel_unloading_kg": qf, "battery_before": before, "battery_after_charge": apply_charge(before, dur, self.state["charge_power_kw"], self.state["charge_efficiency"], bus["battery_capacity_kwh"]), "available_chargers_before": av_before, "station_power_overload": float(op["power"].get("overload", 0.0))})
 
-        prev_time = float(self.state.get("time", dep))
+        transition_start_time = float(self.state.get("time", 0.0))
         self.state.update({"time": dep, "trip_id": bus["trip_id"], "trip_location": idx, "battery": bus["battery_kwh"], "battery_max": bus["battery_capacity_kwh"], "onboard_passengers": bus["onboard_passengers"], "onboard_parcels": len(bus["onboard_parcel_ids"]), "locker": int(st["locker_inventory_kg"]), "idle_drones": sum(1 for d in st.get("drones", []) if d.get("status") == "idle"), "full_batteries": st.get("full_batteries", 0), "station_power": op["P_tot"], "power_margin": st["power_capacity_kw"] - op["P_tot"], "available_chargers": self._available_chargers(st, dep), "calendar_len": len(self.calendar)})
-        st.setdefault("power_overload_amount_prev", 0.0); st.setdefault("power_overload_duration_prev", 0.0)
-        dt_min=max(0.0, dep-prev_time)
-        bus_e = float(op.get("metrics",{}).get("bus_charging_energy_kwh",0.0)) - float(st.get("bus_charging_energy_prev",0.0))
-        drone_e = float(op.get("metrics",{}).get("drone_charging_energy_kwh",0.0)) - float(st.get("drone_charging_energy_prev",0.0))
-        comp = self._collect_transition_components(service, op, bus, st, op.get("delivered_parcel_ids", []), dt_min, bus_e, drone_e)
-        reward, rc = compute_reward(comp, self._reward_alphas())
-        st["power_overload_amount_prev"]=float(st.get("power_overload_amount_kw_min",0.0)); st["power_overload_duration_prev"]=float(st.get("power_overload_duration_min",0.0)); st["bus_charging_energy_prev"]=float(op.get("metrics",{}).get("bus_charging_energy_kwh",0.0)); st["drone_charging_energy_prev"]=float(op.get("metrics",{}).get("drone_charging_energy_kwh",0.0))
+        before_metrics = self._snapshot_cumulative_metrics()
         self.episode_metrics["number_decision_events"] += 1
         self._advance_until_decision()
         terminated, reason = check_termination(self.state, self.current_decision_event is not None)
+        terminal_penalty = 0.0
         if terminated:
             terminal_penalty = apply_terminal_penalty_once(self.__dict__, [p for p in self.parcel_states.values() if p.get("status") != "delivered"], self.state["time"], float(self.config.get("reward", {}).get("eta_l_term", 1.0)), float(self.config.get("reward", {}).get("eta_u_term", 1.0)))
-            rc["terminal_penalty"] = terminal_penalty
-            rc["parcel_lateness"] += terminal_penalty
-            rc["total_cost"] += float(self._reward_alphas().get("alpha_2",1.0))*terminal_penalty
-            rc["reward"] = -rc["total_cost"]
-            reward = rc["reward"]
             self.episode_metrics["terminal_penalty"] += terminal_penalty
+        after_metrics = self._snapshot_cumulative_metrics()
+        reward, rc = self._build_transition_reward(before_metrics, after_metrics, terminal_penalty)
         sums = self.episode_metrics.setdefault("reward_component_sums", {})
         for k, v in rc.items():
             if isinstance(v, (int, float)):
                 sums[k] = float(sums.get(k, 0.0)) + float(v)
-        return self._build_obs_for_current_event(), float(reward), terminated, False, {"executed_action_index": ex_idx, "executed_duration": dur, "executed_duration_min": dur / 60.0, "action_repaired": ex_idx != action_index, "termination_reason": reason, "reward_components": rc, "event": e, "unloaded_parcels": unloaded, "unloading_volume_kg": qf, "unloading_duration_min": qf * unloading_time_per_kg_min, "current_trip_id": bus["trip_id"], "current_station_id": st["station_id"], "feasible_action_mask": mask.tolist(), "passenger_service": service, "dwell_components": {"passenger_dwell_min": service.get("passenger_dwell_min", 0.0), "charging_duration_min": dur / 60.0, "unloading_duration_min": qf * unloading_time_per_kg_min, "realized_dwell_min": service.get("realized_dwell_min", 0.0)}, "departure_time_min": dep}
+        return self._build_obs_for_current_event(), float(reward), terminated, False, {"executed_action_index": ex_idx, "executed_duration": dur, "executed_duration_min": dur / 60.0, "selected_action": int(action_index), "executed_action": int(ex_idx), "action_repaired": ex_idx != action_index, "termination_reason": reason, "reward_components": rc, "event": e, "unloaded_parcels": unloaded, "unloading_volume_kg": qf, "unloading_duration_min": qf * unloading_time_per_kg_min, "current_trip_id": bus["trip_id"], "current_bus_id": bus["trip_id"], "current_station_id": st["station_id"], "transition_start_time": transition_start_time, "transition_end_time": float(self.state.get("time", dep)), "passenger_delay_delta": rc.get("passenger_delay", 0.0), "parcel_lateness_delta": rc.get("parcel_lateness", 0.0) - rc.get("terminal_penalty", 0.0), "energy_consumption_delta": rc.get("total_energy_kwh", 0.0), "power_overload_delta": rc.get("power_overload", 0.0), "battery_violation_delta": rc.get("battery_safety", 0.0), "locker_overflow_delta": rc.get("locker_overflow", 0.0), "terminal_undelivered_penalty": rc.get("terminal_penalty", 0.0), "feasible_action_mask": mask.tolist(), "passenger_service": service, "dwell_components": {"passenger_dwell_min": service.get("passenger_dwell_min", 0.0), "charging_duration_min": dur / 60.0, "unloading_duration_min": qf * unloading_time_per_kg_min, "realized_dwell_min": service.get("realized_dwell_min", 0.0)}, "departure_time_min": dep}
 
     def _refresh_global_state_features(self):
         now = float(self.state.get("time", 0.0))
