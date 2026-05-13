@@ -60,17 +60,17 @@ def main():
                 pol=build_policy(args.method, env=env, out_root=cfg['paths']['outputs'], checkpoint=args.checkpoint, train_if_missing=False, smoke_test=args.smoke_test, cfg=cfg, seed=seed, instance_name=args.instance)
             except TypeError:
                 pol=build_policy(args.method)
-            m=evaluate_policy(env, pol, episodes=1, max_steps=10 if args.smoke_test else 50); m.update({'method':args.method,'instance':args.instance,'seed':seed}); rows.append(m)
+            m=evaluate_policy(env, pol, episodes=1, max_steps=10 if args.smoke_test else None); m.update({'method':args.method,'instance':args.instance,'seed':seed}); rows.append(m)
         out=Path(cfg['paths']['outputs'])/'metrics'/f'eval_{args.method}_{args.instance}.csv'; save_eval_metrics(rows, str(out)); print(json.dumps(rows)); return
     if args.mode == 'benchmark':
-        methods=['no_charging','uniform_15','uniform_30','uniform_60','dwell_based_greedy','battery_threshold','dqn_dr','ddqn_dr','am_ddqn_dr','proposed']
-        out=Path(cfg['paths']['outputs'])/'metrics'/f'benchmark_summary_{args.instance}.csv'
+        methods=load_yaml('configs/experiments/benchmark.yaml').get('methods', [])
+        out=Path(cfg['paths']['outputs'])/'results'/'benchmark'/args.instance/'summary.csv'
         run_benchmark(methods, str(out), env_builder=lambda sd: build_env(cfg, args.instance, sd, args.smoke_test), instance_name=args.instance, test_seeds=args.test_seeds or [args.seed], cfg=cfg, smoke_test=args.smoke_test, train_if_missing=args.train_if_missing); return
     if args.mode == 'ablation':
-        out=Path(cfg['paths']['outputs'])/'metrics'/f'ablation_summary_{args.instance}.csv'
+        out=Path(cfg['paths']['outputs'])/'results'/'ablation'/args.instance/'summary.csv'
         run_ablation(str(out), env_builder=lambda sd: build_env(cfg, args.instance, sd, args.smoke_test), instance_name=args.instance, test_seeds=args.test_seeds or [args.seed], cfg=cfg, smoke_test=args.smoke_test, train_if_missing=args.train_if_missing); return
     if args.mode == 'sensitivity':
-        out=Path(cfg['paths']['outputs'])/'metrics'/f'sensitivity_summary_{args.instance}_{args.factor}.csv'
+        out=Path(cfg['paths']['outputs'])/'results'/'sensitivity'/args.instance/f'{args.factor}.csv'
         run_sensitivity(['proposed'], str(out), env_builder=lambda sd, c: build_env(c, args.instance, sd, args.smoke_test), instance_name=args.instance, test_seeds=args.test_seeds or [args.seed], cfg=cfg, factor=args.factor, values=args.values or [1.0], smoke_test=args.smoke_test, train_if_missing=args.train_if_missing); return
 
 if __name__=='__main__': main()
