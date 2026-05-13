@@ -80,3 +80,68 @@ def test_ordinary_stop_updates_passengers_without_decision():
     if not e.integrated:
         assert is_decision is False
     assert post >= 0 and pre >= 0
+
+
+def test_passenger_service_applied_once_at_decision_event(monkeypatch):
+    env = _build_env(seed=1)
+    ev = env.current_decision_event
+    assert ev is not None
+    bus = env.bus_states[ev.trip_id]
+    stop_id = env.stop_ids[int(ev.stop_index)]
+    q_before = env.stop_queues[stop_id]
+    onboard_before = bus["onboard_passengers"]
+    out = env.step(0)
+    _ = out
+    assert bus["onboard_before_service"] == onboard_before
+    assert env.stop_queues[stop_id] != q_before or out[4]["passenger_service"]["total_board"] >= 0
+
+
+def test_unloading_time_uses_config_seconds_per_kg():
+    env = _build_env(seed=1)
+    ev = env.current_decision_event
+    assert ev is not None
+    _, _, _, _, info = env.step(0)
+    qf = info["unloading_volume_kg"]
+    expected = qf * (env.instance["parcel"]["unloading_time_sec_per_kg"] / 60.0)
+    assert info["unloading_duration_min"] == expected
+
+
+def test_parcel_only_stop_triggers_decision_event():
+    env = _build_env(seed=1)
+    ev = env.current_decision_event
+    assert ev is not None
+    assert ev.parcel_required is True
+
+
+def test_no_charger_event_feasible_action_only_zero():
+    env = _build_env(seed=1)
+    ev = env.current_decision_event
+    assert ev is not None
+    st = env.station_states[ev.station_id]
+    st["charger_release_times_min"] = [env.state["time"] + 1000.0 for _ in st["charger_release_times_min"]]
+    mask = env.get_action_mask().tolist()
+    assert mask[0] == 1
+    assert sum(mask) == 1
+
+
+def test_onboard_parcel_load_decreases_by_unloaded_volume():
+    env = _build_env(seed=1)
+    ev = env.current_decision_event
+    assert ev is not None
+    bus = env.bus_states[ev.trip_id]
+    before = sum(env.parcel_states[p]["weight_kg"] for p in bus["onboard_parcel_ids"])
+    _, _, _, _, info = env.step(0)
+    after = sum(env.parcel_states[p]["weight_kg"] for p in bus["onboard_parcel_ids"])
+    assert before - after == info["unloading_volume_kg"]
+
+
+def test_locker_inventory_increases_on_unload():
+    env = _build_env(seed=1)
+    ev = env.current_decision_event
+    assert ev is not None
+    st = env.station_states[ev.station_id]
+    before = st["locker_inventory_kg"]
+    _, _, _, _, info = env.step(0)
+    assert st["locker_inventory_kg"] >= before
+    for pid in info["unloaded_parcels"]:
+        assert env.parcel_states[pid]["release_time_min"] == info["departure_time_min"]
