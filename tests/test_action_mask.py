@@ -1,6 +1,6 @@
 import numpy as np
 
-from src.env.action_space import A_FULL, feasible_action_mask, repair_action
+from src.env.action_space import DEFAULT_ACTION_SET_SECONDS, feasible_action_mask, repair_action
 from src.env.bus_process import apply_travel_consumption, charged_energy_kwh
 from src.data_generation.scenario_generator import generate_instance
 from src.offline.assignment_data_builder import build_assignment_data
@@ -25,7 +25,7 @@ def test_charged_energy_120_sec_500kw_eta_095():
 
 def test_near_full_battery_masks_long_actions():
     mask = feasible_action_mask(available_chargers=1, current_battery_kwh=159.0, capacity_kwh=160.0, power_kw=500.0, eta=0.95)
-    feasible_durations = [A_FULL[i] for i, v in enumerate(mask.tolist()) if v == 1]
+    feasible_durations = [DEFAULT_ACTION_SET_SECONDS[i] for i, v in enumerate(mask.tolist()) if v == 1]
     assert feasible_durations == [0]
 
 
