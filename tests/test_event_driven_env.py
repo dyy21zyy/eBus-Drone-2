@@ -180,3 +180,53 @@ def test_terminal_penalty_only_on_terminal_transition():
     assert sum(1 for p in penalty_seen if p > 0.0) <= 1
     if penalty_seen:
         assert penalty_seen[-1] >= 0.0
+
+
+def test_observed_passenger_event_matches_step_execution():
+    env = _build_env(seed=11)
+    ev = env.current_decision_event
+    assert ev is not None
+    preview = ev.passenger_service_preview
+    _, _, _, _, info = env.step(0)
+    service = info["passenger_service"]
+    assert int(preview["alighting"]) == int(service["alighting"])
+    assert int(preview["initial_board"]) == int(service["initial_board"])
+
+
+def test_step_does_not_resample_initial_passenger_service(monkeypatch):
+    env = _build_env(seed=12)
+    ev = env.current_decision_event
+    assert ev is not None
+    import src.env.passenger_process as pp
+    calls = {"n": 0}
+    orig = pp.sample_alighting
+    def wrapped(*args, **kwargs):
+        calls["n"] += 1
+        return orig(*args, **kwargs)
+    monkeypatch.setattr(pp, "sample_alighting", wrapped)
+    monkeypatch.setattr(env, "_advance_until_decision", lambda: None)
+    env.step(0)
+    assert calls["n"] == 0
+
+
+def test_additional_arrivals_during_dwell_can_extend_dwell():
+    env = _build_env(seed=13)
+    env.scenario.setdefault("passenger", {})["arrival_rate_per_stop_per_min"] = {str(s): 30.0 for s in env.stop_ids}
+    ev = env.current_decision_event
+    assert ev is not None
+    base = float(ev.passenger_service_preview["passenger_dwell_min"])
+    _, _, _, _, info = env.step(3)
+    service = info["passenger_service"]
+    assert service["board_during_normal"] + service["board_during_excess"] >= 0
+    assert info["dwell_components"]["realized_dwell_min"] >= base
+
+
+def test_stop_indicator_consistent_with_stored_event_and_unloading():
+    env = _build_env(seed=14)
+    ev = env.current_decision_event
+    assert ev is not None
+    expected = bool(ev.passenger_service_preview.get("chi", False) or ev.unloading_volume_kg > 0.0)
+    assert ev.requires_stop is expected
+    _, _, _, _, info = env.step(0)
+    realized = bool(info["passenger_service"]["chi"] or info["unloading_volume_kg"] > 0.0)
+    assert realized is expected

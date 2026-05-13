@@ -37,17 +37,30 @@ def simulate_arrivals_during_dwell(queue: int, onboard_after_initial: int, capac
     }
 
 
-def simulate_passenger_service_at_stop(*, queue: int, onboard: int, capacity: int, alighting_probability: float, rate_per_min: float, rho_al_min_per_pax: float, rho_bo_min_per_pax: float, parcel_unloading_time_min: float, charging_duration_min: float, rng: Any) -> dict:
+def sample_initial_passenger_event(*, queue: int, onboard: int, capacity: int, alighting_probability: float, rho_al_min_per_pax: float, rho_bo_min_per_pax: float, rng: Any) -> dict:
     n_al = sample_alighting(onboard, alighting_probability, rng)
     onboard_after_alight = max(int(onboard) - n_al, 0)
-
     remaining_capacity = max(int(capacity) - onboard_after_alight, 0)
     n_bo_initial, queue_after_initial = board_from_queue(queue, remaining_capacity)
     onboard_after_initial = onboard_after_alight + n_bo_initial
+    passenger_dwell_min = max(max(float(rho_al_min_per_pax), 0.0) * n_al, max(float(rho_bo_min_per_pax), 0.0) * n_bo_initial)
+    return {
+        "queue_at_arrival": max(int(queue), 0),
+        "onboard_before_alight": max(int(onboard), 0),
+        "alighting": n_al,
+        "initial_board": n_bo_initial,
+        "queue_after_initial": queue_after_initial,
+        "onboard_after_initial": onboard_after_initial,
+        "remaining_capacity_after_initial": max(int(capacity) - onboard_after_initial, 0),
+        "passenger_dwell_min": passenger_dwell_min,
+        "chi": (n_al + n_bo_initial) > 0,
+    }
 
-    passenger_dwell = max(max(float(rho_al_min_per_pax), 0.0) * n_al, max(float(rho_bo_min_per_pax), 0.0) * n_bo_initial)
-    normal = simulate_arrivals_during_dwell(queue_after_initial, onboard_after_initial, capacity, rate_per_min, passenger_dwell, rng)
-    onboard_after_normal = onboard_after_initial + normal["boarded"]
+
+def finalize_passenger_service(*, initial_event: dict, capacity: int, rate_per_min: float, rho_bo_min_per_pax: float, parcel_unloading_time_min: float, charging_duration_min: float, rng: Any) -> dict:
+    passenger_dwell = float(initial_event.get("passenger_dwell_min", 0.0))
+    normal = simulate_arrivals_during_dwell(initial_event["queue_after_initial"], initial_event["onboard_after_initial"], capacity, rate_per_min, passenger_dwell, rng)
+    onboard_after_normal = int(initial_event["onboard_after_initial"]) + normal["boarded"]
 
     normal_boarding_extension = max(float(rho_bo_min_per_pax), 0.0) * normal["boarded"]
     passenger_dwell += normal_boarding_extension
@@ -64,14 +77,19 @@ def simulate_passenger_service_at_stop(*, queue: int, onboard: int, capacity: in
 
     realized_dwell = max(passenger_dwell, baseline_non_pax) + extra_extension
     return {
-        "alighting": n_al,
-        "initial_board": n_bo_initial,
+        "alighting": int(initial_event["alighting"]),
+        "initial_board": int(initial_event["initial_board"]),
         "board_during_normal": normal["boarded"],
         "board_during_excess": extra["boarded"],
-        "total_board": n_bo_initial + normal["boarded"] + extra["boarded"],
+        "total_board": int(initial_event["initial_board"]) + normal["boarded"] + extra["boarded"],
         "onboard_final": onboard_final,
         "queue_final": extra["queue_after"],
         "passenger_dwell_min": passenger_dwell,
         "realized_dwell_min": realized_dwell,
-        "chi": (n_al + n_bo_initial) > 0,
+        "chi": bool(initial_event.get("chi", False)),
     }
+
+
+def simulate_passenger_service_at_stop(*, queue: int, onboard: int, capacity: int, alighting_probability: float, rate_per_min: float, rho_al_min_per_pax: float, rho_bo_min_per_pax: float, parcel_unloading_time_min: float, charging_duration_min: float, rng: Any) -> dict:
+    initial = sample_initial_passenger_event(queue=queue, onboard=onboard, capacity=capacity, alighting_probability=alighting_probability, rho_al_min_per_pax=rho_al_min_per_pax, rho_bo_min_per_pax=rho_bo_min_per_pax, rng=rng)
+    return finalize_passenger_service(initial_event=initial, capacity=capacity, rate_per_min=rate_per_min, rho_bo_min_per_pax=rho_bo_min_per_pax, parcel_unloading_time_min=parcel_unloading_time_min, charging_duration_min=charging_duration_min, rng=rng)
