@@ -16,6 +16,7 @@ from src.offline.assignment_data_builder import build_assignment_data
 from src.offline.assignment_io import load_offline_assignment, write_assignment
 from src.offline.assignment_solver import solve_assignment
 from src.utils.config import load_instance, load_scenario, load_yaml
+from src.utils.random_seed import set_seed
 
 
 def run_generate(cfg, instance_name: str, seed: int):
@@ -52,6 +53,9 @@ def main():
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--seeds', nargs='+', type=int, default=[1])
     ap.add_argument('--method', default='no_charging')
+    ap.add_argument('--train-seeds', nargs='+', type=int)
+    ap.add_argument('--test-seeds', nargs='+', type=int)
+    ap.add_argument('--episodes', type=int)
     ap.add_argument('--smoke-test', action='store_true')
     args = ap.parse_args()
     cfg = load_yaml(args.config)
@@ -65,11 +69,20 @@ def main():
         run_offline(cfg, args.instance, args.seed)
 
     if args.mode == 'train':
-        env = build_env(cfg, args.instance, args.seed, args.smoke_test)
-        train_agent(env, method=args.method, episodes=2 if args.smoke_test else 20, max_steps=10 if args.smoke_test else 100)
+        seeds = args.train_seeds or [args.seed]
+        for seed in seeds:
+            set_seed(seed, deterministic=bool(cfg.get('rl',{}).get('deterministic',False)))
+            env = build_env(cfg, args.instance, seed, args.smoke_test)
+            train_agent(env, method=args.method, episodes=args.episodes or (2 if args.smoke_test else 20), max_steps=10 if args.smoke_test else 100, smoke_test=args.smoke_test, out_root=cfg['paths']['outputs'], cfg=cfg)
     if args.mode == 'eval':
-        env = build_env(cfg, args.instance, args.seed, args.smoke_test)
-        m = evaluate_policy(env, build_policy(args.method), episodes=1, max_steps=10 if args.smoke_test else 50)
+        seed = (args.test_seeds or [args.seed])[0]
+        set_seed(seed, deterministic=bool(cfg.get('rl',{}).get('deterministic',False)))
+        env = build_env(cfg, args.instance, seed, args.smoke_test)
+        try:
+            policy = build_policy(args.method, env=env, smoke_test=args.smoke_test)
+        except TypeError:
+            policy = build_policy(args.method)
+        m = evaluate_policy(env, policy, episodes=1, max_steps=10 if args.smoke_test else 50)
         print(json.dumps(m))
     if args.mode == 'benchmark':
         methods = load_yaml(args.config).get('methods', [])
