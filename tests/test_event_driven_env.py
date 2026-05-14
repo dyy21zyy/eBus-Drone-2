@@ -144,7 +144,17 @@ def test_locker_inventory_increases_on_unload():
     _, _, _, _, info = env.step(0)
     assert st["locker_inventory_kg"] >= before
     for pid in info["unloaded_parcels"]:
-        assert env.parcel_states[pid]["release_time_min"] == info["departure_time_min"]
+        assert env.parcel_states[pid]["release_time_min"] == info["parcel_release_time_min"]
+
+
+def test_parcel_release_occurs_at_unloading_completion_before_departure():
+    env = _build_env(seed=1)
+    ev = env.current_decision_event
+    assert ev is not None
+    _, _, _, _, info = env.step(len(env.action_set) - 1)  # enforce charging so departure exceeds unloading completion
+    if info["unloaded_parcels"]:
+        assert info["parcel_release_time_min"] == info["transition_start_time"] + info["unloading_duration_min"]
+        assert info["parcel_release_time_min"] <= info["departure_time_min"]
 
 def test_step_reports_transition_reward_deltas_and_components():
     env = _build_env(seed=3)
