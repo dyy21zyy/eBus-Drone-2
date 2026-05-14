@@ -59,7 +59,14 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
             metrics['late_delivery_count'] += _required_component(rc, 'number_late_deliveries')
             metrics['battery_safety_violation_count'] += int(_required_component(rc, 'battery_safety') > 0)
             dwell = info.get('dwell_components', {})
-            metrics['average_excess_dwell_time'] += max(0.0, float(dwell.get('realized_dwell_min', 0.0)) - float(dwell.get('passenger_dwell_min', 0.0)))
+            extra_dwell = float(
+                dwell.get(
+                    'additional_dwell_min',
+                    max(0.0, float(dwell.get('realized_dwell_min', 0.0)) - float(dwell.get('passenger_dwell_min', 0.0))),
+                )
+            )
+            metrics['average_excess_dwell_time'] += extra_dwell
+            metrics['total_bus_operating_delay'] += float(info.get('bus_operating_delay_delta', extra_dwell))
             metrics['charger_utilization'] += float(info.get('executed_duration_min', 0.0))
             metrics['steps'] += 1
             metrics['repaired_actions'] += int(info.get('action_repaired', False))
@@ -72,7 +79,8 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
     metrics['minimum_bus_battery'] = 0.0 if min_bat == float('inf') else min_bat
     metrics['undelivered_parcel_count'] = float(sum(1 for p in env.parcel_states.values() if p.get('status') != 'delivered')) if hasattr(env, 'parcel_states') else 0.0
     metrics['average_locker_holding_time'] = float(sum((p.get('locker_holding_time_min') or 0.0) for p in getattr(env, 'parcel_states', {}).values())) / max(1.0, float(len(getattr(env, 'parcel_states', {}))))
-    metrics['total_bus_operating_delay'] = float(sum(b.get('accumulated_delay_min', 0.0) for b in getattr(env, 'bus_states', {}).values()))
+    if metrics['total_bus_operating_delay'] <= 0.0:
+        metrics['total_bus_operating_delay'] = float(sum(b.get('accumulated_operating_delay_min', 0.0) for b in getattr(env, 'bus_states', {}).values()))
     metrics['drone_battery_stockout_count'] = float(sum(1 for st in getattr(env, 'station_states', {}).values() if st.get('full_batteries', 0) <= 0))
 
     out = finalize_metrics(metrics)
