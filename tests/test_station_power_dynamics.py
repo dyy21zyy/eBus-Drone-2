@@ -24,6 +24,28 @@ def test_drone_battery_only_full_after_completion():
     assert third["completed"] == 1
 
 
+def test_new_battery_jobs_respect_active_slots_and_residual_power():
+    st = {
+        "depleted_batteries": 5,
+        "empty_batteries": 5,
+        "full_batteries": 0,
+        "charging_batteries": [
+            {"start_time_min": 0.0, "completion_time_min": 20.0},
+            {"start_time_min": 0.0, "completion_time_min": 20.0},
+        ],
+        "G_max": 3,
+        "P_capacity": 510.0,
+        "P_bat": 100.0,
+        "battery_charge_duration_min": 10.0,
+    }
+    # residual for new jobs: 510 - 200(bus) - 100(base) - 2*100(active) = 10 => 0 extra slots
+    out = charge_depleted_batteries(st, now=1.0, p_e=200.0, p_l=100.0)
+    assert out["g"] == 0
+    assert len(st["charging_batteries"]) == 2
+    assert out["P_D"] == 200.0
+    assert st["depleted_batteries"] == 5
+
+
 def test_charger_availability_by_release_time():
     rel = [1.0, 3.0]
     now = 2.0
