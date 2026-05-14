@@ -192,6 +192,48 @@ def test_terminal_penalty_only_on_terminal_transition():
         assert penalty_seen[-1] >= 0.0
 
 
+def test_transition_reward_tracks_late_delivery_and_delivered_deltas():
+    env = _build_env(seed=5)
+    reward, rc = env._build_transition_reward(
+        before={
+            "passenger_delay": 0.0,
+            "parcel_lateness": 0.0,
+            "late_delivery_count": 0.0,
+            "delivered_count": 0.0,
+            "energy_consumption": 0.0,
+            "power_overload": 0.0,
+            "battery_violation": 0.0,
+            "locker_overflow": 0.0,
+            "bus_charging_energy_kwh": 0.0,
+            "drone_charging_energy_kwh": 0.0,
+            "power_overload_duration": 0.0,
+            "locker_overflow_duration": 0.0,
+            "locker_overflow_amount": 0.0,
+        },
+        after={
+            "passenger_delay": 0.0,
+            "parcel_lateness": 3.5,
+            "late_delivery_count": 2.0,
+            "delivered_count": 4.0,
+            "energy_consumption": 0.0,
+            "power_overload": 0.0,
+            "battery_violation": 0.0,
+            "locker_overflow": 0.0,
+            "bus_charging_energy_kwh": 0.0,
+            "drone_charging_energy_kwh": 0.0,
+            "power_overload_duration": 0.0,
+            "locker_overflow_duration": 0.0,
+            "locker_overflow_amount": 0.0,
+        },
+        terminal_penalty=0.0,
+    )
+    assert rc["number_late_deliveries"] == 2.0
+    assert rc["late_delivery_count_delta"] == 2.0
+    assert rc["delivered_count_delta"] == 4.0
+    assert rc["parcel_lateness"] == 3.5
+    assert reward == -rc["total_cost"]
+
+
 def test_observed_passenger_event_matches_step_execution():
     env = _build_env(seed=11)
     ev = env.current_decision_event
