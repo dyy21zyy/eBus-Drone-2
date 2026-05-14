@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from src.main import main
+from src.utils.metrics import REQUIRED_PAPER_METRICS
 
 
 def _run(argv, monkeypatch):
@@ -87,3 +88,45 @@ def test_export_tables_refuses_missing_metrics(tmp_path, monkeypatch):
     monkeypatch.setattr('sys.argv', ['prog', '--mode', 'export_tables', '--config', 'configs/default.yaml', '--output-dir', str(out)])
     with pytest.raises(KeyError, match='Missing metrics'):
         main()
+
+
+def test_export_tables_reads_nested_benchmark_and_generates_csv_tex(tmp_path, monkeypatch):
+    out = tmp_path / 'o'
+    p = out / 'results' / 'benchmark' / 'medium'
+    p.mkdir(parents=True)
+    header = ['method', 'seed', 'full_horizon_completed', 'smoke_mode'] + REQUIRED_PAPER_METRICS
+    row1 = ['proposed', '1', 'true', 'false'] + ['10'] * len(REQUIRED_PAPER_METRICS)
+    row2 = ['proposed', '2', 'true', 'false'] + ['14'] * len(REQUIRED_PAPER_METRICS)
+    (p / 'summary.csv').write_text(",".join(header) + "\n" + ",".join(row1) + "\n" + ",".join(row2) + "\n", encoding='utf-8')
+    monkeypatch.setattr('sys.argv', ['prog', '--mode', 'export_tables', '--config', 'configs/default.yaml', '--output-dir', str(out), '--experiment', 'overall'])
+    main()
+    csv_out = out / 'tables' / 'benchmark_medium_overall.csv'
+    tex_out = out / 'tables' / 'benchmark_medium_overall.tex'
+    assert csv_out.exists() and csv_out.read_text(encoding='utf-8').strip()
+    txt = tex_out.read_text(encoding='utf-8')
+    assert tex_out.exists() and '\\begin{tabular}' in txt and '\\end{tabular}' in txt
+    assert '12' in csv_out.read_text(encoding='utf-8')
+
+
+def test_export_tables_refuses_empty_results(tmp_path, monkeypatch):
+    out = tmp_path / 'o'
+    p = out / 'results' / 'benchmark' / 'medium'
+    p.mkdir(parents=True)
+    (p / 'summary.csv').write_text('', encoding='utf-8')
+    monkeypatch.setattr('sys.argv', ['prog', '--mode', 'export_tables', '--config', 'configs/default.yaml', '--output-dir', str(out), '--experiment', 'overall'])
+    with pytest.raises(ValueError, match='non-empty'):
+        main()
+
+
+def test_export_tables_excludes_smoke_by_default(tmp_path, monkeypatch):
+    out = tmp_path / 'o'
+    p = out / 'results' / 'benchmark' / 'medium'
+    p.mkdir(parents=True)
+    header = ['method', 'seed', 'full_horizon_completed', 'smoke_mode'] + REQUIRED_PAPER_METRICS
+    smoke = ['proposed', '1', 'true', 'true'] + ['10'] * len(REQUIRED_PAPER_METRICS)
+    formal = ['proposed', '2', 'true', 'false'] + ['20'] * len(REQUIRED_PAPER_METRICS)
+    (p / 'summary.csv').write_text(",".join(header) + "\n" + ",".join(smoke) + "\n" + ",".join(formal) + "\n", encoding='utf-8')
+    monkeypatch.setattr('sys.argv', ['prog', '--mode', 'export_tables', '--config', 'configs/default.yaml', '--output-dir', str(out), '--experiment', 'overall'])
+    main()
+    txt = (out / 'tables' / 'benchmark_medium_overall.csv').read_text(encoding='utf-8')
+    assert ',1,1,' in txt
