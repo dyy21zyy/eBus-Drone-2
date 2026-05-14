@@ -28,9 +28,11 @@ def start_charging_jobs(station_state: dict, now: float, p_e: float, p_l: float)
             charge_duration = 10.0
     charge_duration = float(charge_duration)
 
-    residual_power = max(0.0, p_capacity - float(p_e) - float(p_l))
-    residual_slots = math.floor(residual_power / p_bat) if p_bat > 0 else 0
-    g = min(depleted, g_max, residual_slots)
+    active_jobs = len(jobs)
+    available_slots = max(0, g_max - active_jobs)
+    residual_power_after_active_jobs = p_capacity - float(p_e) - float(p_l) - active_jobs * p_bat
+    available_power_slots = max(0, math.floor(residual_power_after_active_jobs / p_bat)) if p_bat > 0 else 0
+    g = min(depleted, available_slots, available_power_slots)
     for _ in range(max(0, g)):
         jobs.append({"start_time_min": now, "completion_time_min": now + charge_duration})
     station_state["depleted_batteries"] = depleted - max(0, g)
