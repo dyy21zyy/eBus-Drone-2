@@ -64,3 +64,22 @@ def test_parcel_only_stop_is_decision_epoch():
     env = EBusDroneEnv(config=cfg, instance=instance, scenario=scenario, assignment=assignment)
     assert env.current_event is not None
     assert env.current_event.parcel_required is True
+
+
+def test_env_rejects_infeasible_action_in_strict_mode():
+    cfg = load_yaml('configs/default.yaml')
+    cfg.setdefault("env", {})["strict_action_validation"] = True
+    inst_cfg = load_yaml('configs/instances/small.yaml')
+    instance = generate_instance(cfg, inst_cfg, seed=2)
+    scenario = {"passenger": {"passenger_arrivals": {}}, "power": {"station_loads_kw": {}}}
+    assignment = solve_assignment(build_assignment_data(instance)).to_dict()
+    env = EBusDroneEnv(config=cfg, instance=instance, scenario=scenario, assignment=assignment)
+    obs, _ = env.reset(seed=2)
+    _ = obs
+    mask = env.get_action_mask()
+    infeasible = next((i for i, v in enumerate(mask.tolist()) if v == 0), None)
+    if infeasible is None:
+        return
+    import pytest
+    with pytest.raises(ValueError):
+        env.step(infeasible)

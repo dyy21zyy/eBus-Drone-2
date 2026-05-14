@@ -21,6 +21,7 @@ class DDQNDRAgent(DQNDRAgent):
         q = self.online(obs).gather(1, act.unsqueeze(1)).squeeze(1)
         with torch.no_grad():
             q_online_next = self.online(nxt)
+            nmask = None
             if self.use_action_mask:
                 nmask = torch.tensor(np.stack([t.next_action_mask for t in b]), dtype=torch.float32, device=self.device)
                 nmask = nmask.clone()
@@ -28,7 +29,10 @@ class DDQNDRAgent(DQNDRAgent):
                 nmask[all_zero, 0] = 1.0
                 q_online_next = q_online_next.masked_fill(nmask <= 0, -1e9)
             a_next = q_online_next.argmax(dim=1)
-            q_next = self.target(nxt).gather(1, a_next.unsqueeze(1)).squeeze(1)
+            q_target_next = self.target(nxt)
+            if self.use_action_mask and nmask is not None:
+                q_target_next = q_target_next.masked_fill(nmask <= 0, -1e9)
+            q_next = q_target_next.gather(1, a_next.unsqueeze(1)).squeeze(1)
             y = rew + (1 - done) * float(self.cfg.get("gamma", 0.99)) * q_next
         loss = F.mse_loss(q, y)
         self.optim.zero_grad(); loss.backward(); torch.nn.utils.clip_grad_norm_(self.online.parameters(), float(self.cfg.get("gradient_clip_norm", 10.0))); self.optim.step(); self.steps += 1
