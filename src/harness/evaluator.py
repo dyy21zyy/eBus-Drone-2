@@ -79,7 +79,13 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
 
     metrics['minimum_bus_battery'] = 0.0 if min_bat == float('inf') else min_bat
     metrics['undelivered_parcel_count'] = float(terminal_undelivered_count_total) if terminal_undelivered_count_total > 0.0 else (float(sum(1 for p in env.parcel_states.values() if p.get('status') != 'delivered')) if hasattr(env, 'parcel_states') else 0.0)
-    delivered_parcels = [p for p in getattr(env, 'parcel_states', {}).values() if p.get('status') == 'delivered']
+    end_time = float(getattr(env, 'state', {}).get('time', 0.0))
+    delivered_parcels = [
+        p for p in getattr(env, 'parcel_states', {}).values()
+        if p.get('status') == 'delivered'
+        and p.get('delivery_completion_time_min') is not None
+        and float(p.get('delivery_completion_time_min')) <= end_time + 1e-9
+    ]
     locker_holding_times = [float(p['locker_holding_time_min']) for p in delivered_parcels if p.get('locker_holding_time_min') is not None]
     metrics['average_locker_holding_time'] = float(sum(locker_holding_times)) / float(len(locker_holding_times)) if locker_holding_times else 0.0
     if metrics['total_bus_operating_delay'] <= 0.0:
@@ -93,10 +99,14 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
 
     out = finalize_metrics(metrics)
     out['max_steps'] = max_steps
-    out['episode_end_time'] = float(getattr(env, 'state', {}).get('time', 0.0))
+    out['episode_end_time'] = end_time
     out['operating_horizon'] = float(getattr(env, 'horizon', getattr(env, 'state', {}).get('horizon', 0.0)))
     out['termination_reason'] = termination_reason or ('horizon_reached' if out['episode_end_time'] >= out['operating_horizon'] else 'unknown')
     out['full_horizon_completed'] = bool(terminated_by_env and out['termination_reason'] == 'horizon_reached' and not truncated_by_max_steps)
+    if out['episode_end_time'] > out['operating_horizon'] + 1e-6:
+        raise RuntimeError(f"Episode exceeded operating horizon: {out['episode_end_time']} > {out['operating_horizon']}")
+    if out['termination_reason'] == 'horizon_reached' and abs(out['episode_end_time'] - out['operating_horizon']) > 1e-6:
+        raise RuntimeError(f"Horizon termination must end at horizon: {out['episode_end_time']} vs {out['operating_horizon']}")
     missing = [k for k in REQUIRED_PAPER_METRICS if k not in out]
     if missing:
         raise KeyError(f"Missing required paper metrics in evaluator output: {missing}")

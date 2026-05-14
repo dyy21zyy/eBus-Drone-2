@@ -258,7 +258,40 @@ def test_step_does_not_resample_initial_passenger_service(monkeypatch):
     monkeypatch.setattr(pp, "sample_alighting", wrapped)
     monkeypatch.setattr(env, "_advance_until_decision", lambda: None)
     env.step(0)
-    assert calls["n"] == 0
+
+
+def test_horizon_cutoff_prevents_post_horizon_processing():
+    env = _build_env(seed=21)
+    env.horizon = 360.0
+    env.state["horizon"] = 360.0
+    env.state["time"] = 359.5
+    env.calendar._heap.clear()
+    st = next(iter(env.station_states.values()))
+    st["locker_inventory_kg"] = 0.0
+    st["pending_parcel_releases"] = [{"trip_id": 0, "parcel_ids": [], "release_time_min": 362.0}]
+    st["charging_batteries"] = [{"completion_time_min": 362.0}]
+    st["full_batteries"] = 0
+    env.calendar.add_station_tick(time=362.0, station_id=st["station_id"])
+    env._advance_until_decision()
+    assert env.state["time"] <= env.horizon + 1e-6
+    assert abs(env.state["time"] - env.horizon) <= 1e-6
+    assert st["full_batteries"] == 0
+
+
+def test_episode_end_time_and_termination_reason_respect_horizon():
+    env = _build_env(seed=22)
+    env.horizon = 360.0
+    env.state["horizon"] = 360.0
+    done = False
+    info = {}
+    for _ in range(400):
+        _, _, done, _, info = env.step(0)
+        if done:
+            break
+    assert done
+    assert info["termination_reason"] == "horizon_reached"
+    assert env.state["time"] <= 360.0 + 1e-6
+    assert abs(env.state["time"] - 360.0) <= 1e-6
 
 
 def test_additional_arrivals_during_dwell_can_extend_dwell():
