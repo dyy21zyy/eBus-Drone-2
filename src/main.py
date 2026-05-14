@@ -14,12 +14,12 @@ from src.harness.benchmark_runner import build_policy, normalize_method_name, ru
 from src.harness.evaluator import evaluate_policy, save_eval_metrics
 from src.harness.sensitivity_runner import FACTOR_PATHS, run_sensitivity
 from src.harness.trainer import train_agent
+from src.harness.table_exporter import export_tables
 from src.offline.assignment_data_builder import build_assignment_data
 from src.offline.assignment_io import load_offline_assignment, write_assignment
 from src.offline.assignment_solver import solve_assignment
 from src.offline.assignment_validator import summarize_assignment_flows
 from src.utils.config import load_instance, load_scenario, load_yaml
-from src.utils.metrics import REQUIRED_PAPER_METRICS
 from src.utils.random_seed import set_seed
 
 VALID_METHODS = {
@@ -111,27 +111,17 @@ def _run_eval(cfg, instance, seed, method, args, rows):
     rows.append(m)
 
 
-def _export_tables(output_dir: Path, experiment_name: str):
-    src_csv = output_dir / "results" / experiment_name / "summary.csv"
-    _require_exists(src_csv, f"Missing results CSV for export_tables: {src_csv}")
-    rows = list(csv.DictReader(src_csv.open("r", encoding="utf-8")))
-    if not rows:
-        raise ValueError("Empty results: export_tables requires non-empty metrics rows.")
-    missing = [k for k in REQUIRED_PAPER_METRICS if k not in rows[0]]
-    if missing:
-        raise KeyError(f"Missing metrics for export_tables: {missing}")
-    out_csv = output_dir / "tables" / f"{experiment_name}_paper.csv"
-    out_tex = output_dir / "tables" / f"{experiment_name}_paper.tex"
-    out_csv.parent.mkdir(parents=True, exist_ok=True)
-    with out_csv.open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=rows[0].keys())
-        w.writeheader(); w.writerows(rows)
-    tex_lines = ["\\begin{tabular}{lrr}", "method & total_reward & total_cost \\\\", "\\hline"]
-    for r in rows:
-        tex_lines.append(f"{r['method']} & {r.get('total_reward','')} & {r.get('total_cost','')} \\\\")
-    tex_lines.append("\\end{tabular}")
-    out_tex.write_text("\n".join(tex_lines), encoding="utf-8")
-
+def _export_tables(cfg: dict, experiment_name: str, instance_name: str, metrics: list[str] | None = None):
+    exp_cfg = load_yaml(f"configs/experiments/{experiment_name}.yaml") if Path(f"configs/experiments/{experiment_name}.yaml").exists() else {}
+    method_order = exp_cfg.get('methods', cfg.get('methods', []))
+    return export_tables(
+        output_root=Path(cfg['paths']['outputs']),
+        experiment=experiment_name,
+        instance=instance_name,
+        method_order=method_order,
+        metrics_subset=metrics,
+        config_snapshot=cfg,
+    )
 
 def main():
     ap = argparse.ArgumentParser()
@@ -152,6 +142,7 @@ def main():
     ap.add_argument('--max-steps', type=int, default=None)
     ap.add_argument('--allow-truncated-for-testing', action='store_true')
     ap.add_argument('--output-dir')
+    ap.add_argument('--metrics', nargs='+')
     ap.add_argument('--overwrite', action='store_true')
     args = ap.parse_args()
     if args.smoke_test:
@@ -215,7 +206,8 @@ def main():
                 run_sensitivity(plan['methods'], str(out), env_builder=lambda sd, c, _i=i: build_env(c, _i, sd, args.smoke), instance_name=i, test_seeds=plan['seeds'], cfg=cfg, factor=args.sensitivity, values=vals, smoke_test=args.smoke, train_if_missing=args.train_if_missing)
         return
     if args.mode == 'export_tables':
-        _export_tables(Path(cfg['paths']['outputs']), args.experiment or 'benchmark')
+        exp = args.experiment or 'benchmark'
+        _export_tables(cfg, exp, args.instance, args.metrics)
         return
 
 
