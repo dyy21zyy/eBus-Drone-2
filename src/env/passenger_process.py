@@ -76,6 +76,7 @@ def finalize_passenger_service(*, initial_event: dict, capacity: int, rate_per_m
         extra_extension = max(float(rho_bo_min_per_pax), 0.0) * extra["boarded"]
 
     realized_dwell = max(passenger_dwell, baseline_non_pax) + extra_extension
+    affected_passengers = max(0, int(onboard_final))
     return {
         "alighting": int(initial_event["alighting"]),
         "initial_board": int(initial_event["initial_board"]),
@@ -87,6 +88,7 @@ def finalize_passenger_service(*, initial_event: dict, capacity: int, rate_per_m
         "passenger_dwell_min": passenger_dwell,
         "realized_dwell_min": realized_dwell,
         "chi": bool(initial_event.get("chi", False)),
+        "affected_passengers": affected_passengers,
     }
 
 
