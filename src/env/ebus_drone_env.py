@@ -179,6 +179,15 @@ class EBusDroneEnv:
         self.current_decision_event = None
         self.current_event = None
         while len(self.calendar) > 0:
+            next_event = self.calendar.peek_next()
+            if next_event is not None and float(next_event.time) > self.horizon + 1e-9:
+                prev_t = float(self.state.get("time", 0.0))
+                cutoff_t = float(self.horizon)
+                if cutoff_t > prev_t:
+                    self._run_station_interval(prev_t, cutoff_t)
+                self.state["time"] = cutoff_t
+                self.current_event = None
+                return
             e = self.calendar.pop_next()
             prev_t = float(self.state.get("time", 0.0))
             self._run_station_interval(prev_t, float(e.time))
@@ -269,7 +278,13 @@ class EBusDroneEnv:
 
 
     def _snapshot_cumulative_metrics(self) -> dict:
-        delivered = [p for p in self.parcel_states.values() if p.get("status") == "delivered" and p.get("delivery_completion_time_min") is not None]
+        now = float(self.state.get("time", 0.0))
+        delivered = [
+            p for p in self.parcel_states.values()
+            if p.get("status") == "delivered"
+            and p.get("delivery_completion_time_min") is not None
+            and float(p.get("delivery_completion_time_min")) <= now + 1e-9
+        ]
         parcel_lateness = sum(max(0.0, float(p["delivery_completion_time_min"]) - float(p.get("delivery_deadline_min", p.get("deadline_min", p["delivery_completion_time_min"])))) for p in delivered)
         late_delivery_count = sum(1 for p in delivered if float(p["delivery_completion_time_min"]) > float(p.get("delivery_deadline_min", p.get("deadline_min", p["delivery_completion_time_min"]))))
         energy_bus = sum(float(st.get("bus_charging_energy_kwh", 0.0)) for st in self.station_states.values())
@@ -390,9 +405,10 @@ class EBusDroneEnv:
             })
         unloaded = []
 
-        dep = self.state["time"] + service["realized_dwell_min"]
+        raw_dep = self.state["time"] + service["realized_dwell_min"]
+        dep = min(float(raw_dep), float(self.horizon))
         idx = int(e.stop_index)
-        if idx + 1 < len(self.stop_ids):
+        if idx + 1 < len(self.stop_ids) and dep < self.horizon - 1e-9:
             next_t = dep + float(self.travel_times[idx + 1] - self.travel_times[idx])
             self.calendar.add_bus_arrival(time=next_t, trip_id=bus["trip_id"], stop_index=idx + 1, station_id=self.station_by_stop.get(self.stop_ids[idx+1], -1), integrated=self.stop_ids[idx+1] in self.station_by_stop, passengers_required=False, parcel_required=False)
             bus["next_arrival_time_min"] = next_t
@@ -424,6 +440,9 @@ class EBusDroneEnv:
         before_metrics["bus_operating_delay"] = float(before_metrics.get("bus_operating_delay", 0.0)) - additional_dwell_min
         self.episode_metrics["number_decision_events"] += 1
         self._advance_until_decision()
+        self.state["time"] = min(float(self.state.get("time", 0.0)), float(self.horizon))
+        if self.state["time"] > self.horizon + 1e-6:
+            raise RuntimeError(f"Environment time exceeded operating horizon: {self.state['time']} > {self.horizon}")
         terminated, reason = check_termination(self.state, self.current_decision_event is not None)
         terminal_penalty = 0.0
         if terminated:
@@ -436,6 +455,8 @@ class EBusDroneEnv:
             if isinstance(v, (int, float)):
                 sums[k] = float(sums.get(k, 0.0)) + float(v)
         undelivered_terminal_count = float(sum(1 for p in self.parcel_states.values() if p.get("status") != "delivered")) if terminated else 0.0
+        if terminated and reason == "horizon_reached" and abs(float(self.state.get("time", 0.0)) - float(self.horizon)) > 1e-6:
+            raise RuntimeError(f"Horizon termination must end exactly at horizon: t={self.state.get('time')} horizon={self.horizon}")
         return self._build_obs_for_current_event(), float(reward), terminated, False, {"executed_action_index": ex_idx, "executed_duration": dur, "executed_duration_min": dur / 60.0, "selected_action": int(action_index), "executed_action": int(ex_idx), "action_repaired": ex_idx != action_index, "invalid_action": invalid_action, "invalid_action_count": int(self.episode_metrics.get("invalid_action_count", 0)), "termination_reason": reason, "reward_components": rc, "event": e, "unloaded_parcels": unload_ids, "unloading_volume_kg": qf, "unloading_duration_min": qf * unloading_time_per_kg_min, "parcel_release_time_min": release_time, "current_trip_id": bus["trip_id"], "current_bus_id": bus["trip_id"], "current_station_id": st["station_id"], "transition_start_time": transition_start_time, "transition_end_time": float(self.state.get("time", dep)), "passenger_delay_delta": rc.get("passenger_delay", 0.0), "parcel_lateness_delta": rc.get("parcel_lateness", 0.0) - rc.get("terminal_penalty", 0.0), "late_delivery_count_delta": rc.get("late_delivery_count_delta", 0.0), "delivered_count_delta": rc.get("delivered_count_delta", 0.0), "undelivered_terminal_count": undelivered_terminal_count, "energy_consumption_delta": rc.get("total_energy_kwh", 0.0), "power_overload_delta": rc.get("power_overload", 0.0), "battery_violation_delta": rc.get("battery_safety", 0.0), "locker_overflow_delta": rc.get("locker_overflow", 0.0), "terminal_undelivered_penalty": rc.get("terminal_penalty", 0.0), "feasible_action_mask": mask.tolist(), "passenger_service": service, "dwell_components": {"passenger_dwell_min": passenger_dwell_min, "freight_dwell_min": freight_dwell_min, "charging_duration_min": charging_duration_min, "realized_dwell_min": realized_dwell_min, "additional_dwell_min": additional_dwell_min, "affected_passengers": affected_passengers, "event_passenger_delay": event_passenger_delay}, "departure_time_min": dep, "bus_operating_delay_delta": additional_dwell_min}
 
     def _refresh_global_state_features(self):
