@@ -9,6 +9,7 @@ from src.rl.agents.dqn_dr_agent import DQNDRAgent
 from src.rl.agents.ddqn_dr_agent import DDQNDRAgent
 from src.rl.agents.am_ddqn_dr_agent import AMDDQNDRAgent
 from src.rl.agents.am_dueling_ddqn_dr_agent import AMDuelingDDQNDRAgent
+from src.rl.sketch_buffer import SketchBuffer
 
 LEARNING_METHODS = {"dqn_dr", "ddqn_dr", "am_ddqn_dr", "proposed", "am_dueling_ddqn_dr"}
 
@@ -45,12 +46,17 @@ def train_agent(env, method: str = "proposed", episodes: int = 5, max_steps: int
     t0 = time.time()
     for ep in range(episodes):
         obs, _ = env.reset(seed=seed + ep)
+        sketch = SketchBuffer()
         ep_reward = 0.0
         ep_cost = 0.0
         losses = []
         bat_dep = 0
         dec = 0
         step_idx = 0
+        delayed_reward_sketch_count = 0
+        completed_transition_count = 0
+        terminal_transition_count = 0
+        replay_insertions_before = len(agent.buffer)
         termination_reason = None
         truncated_by_max_steps = False
         while True:
@@ -59,9 +65,32 @@ def train_agent(env, method: str = "proposed", episodes: int = 5, max_steps: int
                 termination_reason = "max_steps_truncated"
                 break
             mask = env.get_action_mask(); action = agent.select_action(obs, mask, training=True)
+
+            sketch.start(
+                observation=obs,
+                action_index=action,
+                action_mask=mask,
+                info={"decision_step": step_idx, "decision_event": getattr(env, "state", {}).get("time")},
+            )
+            delayed_reward_sketch_count += 1
+
             nxt, reward, term, trunc, info = env.step(action)
             nxt_mask = env.get_action_mask() if not (term or trunc) else mask
-            agent.observe(obs, action, reward, nxt, term or trunc, mask, nxt_mask, info)
+            completed = sketch.finalize(reward, nxt, term or trunc, nxt_mask, info)
+            if completed is not None:
+                agent.observe(
+                    completed["observation"],
+                    completed["action_index"],
+                    completed["reward"],
+                    completed["next_observation"],
+                    completed["done"],
+                    completed["action_mask"],
+                    completed["next_action_mask"],
+                    completed["info"],
+                )
+                completed_transition_count += 1
+                if term or trunc:
+                    terminal_transition_count += 1
             loss = agent.update(); obs = nxt; ep_reward += reward; dec += 1
             step_idx += 1
             if loss is not None: losses.append(float(loss))
@@ -71,6 +100,14 @@ def train_agent(env, method: str = "proposed", episodes: int = 5, max_steps: int
             if term or trunc:
                 termination_reason = info.get("termination_reason") or ("truncated" if trunc else None)
                 break
+        incomplete_sketch_count = 1 if sketch.has_pending() else 0
+        replay_insertions_after = len(agent.buffer)
+        replay_insertions_episode = replay_insertions_after - replay_insertions_before
+        if not truncated_by_max_steps:
+            assert incomplete_sketch_count == 0, "incomplete_sketch_count must be zero at formal episode end"
+        assert completed_transition_count == replay_insertions_episode, "completed transitions must match replay insertions"
+        if termination_reason != "max_steps_truncated" and dec > 0:
+            assert terminal_transition_count == 1, "terminal transition must be stored exactly once"
         operating_horizon = float(getattr(env, "horizon_sec", 0.0)) / 60.0
         episode_end_time = float(getattr(env, "state", {}).get("time", 0.0)) / 60.0
         rows.append({
@@ -88,6 +125,11 @@ def train_agent(env, method: str = "proposed", episodes: int = 5, max_steps: int
             "full_horizon_completed": bool((termination_reason == "horizon_reached") and not truncated_by_max_steps),
             "truncated_by_max_steps": bool(truncated_by_max_steps),
             "paper_ready_episode": bool((not smoke_test) and (not truncated_by_max_steps)),
+            "delayed_reward_sketch_count": delayed_reward_sketch_count,
+            "completed_transition_count": completed_transition_count,
+            "incomplete_sketch_count": incomplete_sketch_count,
+            "terminal_transition_count": terminal_transition_count,
+            "replay_insertions_episode": replay_insertions_episode,
         })
     out = Path(out_root)
     (out / "checkpoints").mkdir(parents=True, exist_ok=True)
