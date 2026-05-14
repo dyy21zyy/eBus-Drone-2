@@ -55,7 +55,7 @@ class EBusDroneEnv:
         self.assignment_index = build_assignment_indices(self.assignment)
         self.calendar = EventCalendar()
         self.event_log = []
-        self.episode_metrics = {"number_decision_events": 0, "terminal_penalty": 0.0, "reward_component_sums": {}, "invalid_action_count": 0}
+        self.episode_metrics = {"number_decision_events": 0, "terminal_penalty": 0.0, "reward_component_sums": {}, "invalid_action_count": 0, "action_repair_count": 0, "requested_action_sum": 0.0, "executed_action_sum": 0.0, "action_gap_sum": 0.0}
         self.rng = np.random.default_rng(int(self.config.get("seed", 0)))
         self.stop_queues = {sid: 0 for sid in self.stop_ids}
         self.stop_last_update = {sid: 0.0 for sid in self.stop_ids}
@@ -365,9 +365,19 @@ class EBusDroneEnv:
                 f"Infeasible action index {action_index} at time={self.state['time']:.3f}. "
                 f"Feasible actions={self.get_feasible_actions()}"
             )
+        # Deterministic infeasible-action repair rule: when the requested action is infeasible,
+        # execute the largest feasible action index that does not exceed the requested index.
+        # If no positive duration is feasible (e.g., no charger available), this resolves to u=0.
         ex_idx = action_index if not invalid_action else self.repair_action(action_index)
+        feasible_count = int(np.sum(mask))
+        repair_reason = "none"
         if invalid_action:
             self.episode_metrics["invalid_action_count"] = int(self.episode_metrics.get("invalid_action_count", 0)) + 1
+            self.episode_metrics["action_repair_count"] = int(self.episode_metrics.get("action_repair_count", 0)) + 1
+            repair_reason = "infeasible_action_repaired_to_nearest_feasible_not_exceeding_request"
+        self.episode_metrics["requested_action_sum"] = float(self.episode_metrics.get("requested_action_sum", 0.0)) + float(action_index)
+        self.episode_metrics["executed_action_sum"] = float(self.episode_metrics.get("executed_action_sum", 0.0)) + float(ex_idx)
+        self.episode_metrics["action_gap_sum"] = float(self.episode_metrics.get("action_gap_sum", 0.0)) + abs(float(action_index) - float(ex_idx))
         dur = action_index_to_duration(ex_idx, self.action_set)
         before = bus["battery_kwh"]
         av_before = self._available_chargers(st, self.state["time"])
@@ -462,7 +472,7 @@ class EBusDroneEnv:
         undelivered_terminal_count = float(len(self._terminal_undelivered_parcels(terminal_eval_time))) if terminated else 0.0
         if terminated and reason == "horizon_reached" and abs(float(self.state.get("time", 0.0)) - float(self.horizon)) > 1e-6:
             raise RuntimeError(f"Horizon termination must end exactly at horizon: t={self.state.get('time')} horizon={self.horizon}")
-        return self._build_obs_for_current_event(), float(reward), terminated, False, {"executed_action_index": ex_idx, "executed_duration": dur, "executed_duration_min": dur / 60.0, "selected_action": int(action_index), "executed_action": int(ex_idx), "action_repaired": ex_idx != action_index, "invalid_action": invalid_action, "invalid_action_count": int(self.episode_metrics.get("invalid_action_count", 0)), "termination_reason": reason, "reward_components": rc, "event": e, "unloaded_parcels": unload_ids, "unloading_volume_kg": qf, "unloading_duration_min": qf * unloading_time_per_kg_min, "parcel_release_time_min": release_time, "current_trip_id": bus["trip_id"], "current_bus_id": bus["trip_id"], "current_station_id": st["station_id"], "transition_start_time": transition_start_time, "transition_end_time": float(self.state.get("time", dep)), "passenger_delay_delta": rc.get("passenger_delay", 0.0), "parcel_lateness_delta": rc.get("parcel_lateness", 0.0) - rc.get("terminal_penalty", 0.0), "late_delivery_count_delta": rc.get("late_delivery_count_delta", 0.0), "delivered_count_delta": rc.get("delivered_count_delta", 0.0), "undelivered_terminal_count": undelivered_terminal_count, "energy_consumption_delta": rc.get("total_energy_kwh", 0.0), "power_overload_delta": rc.get("power_overload", 0.0), "battery_violation_delta": rc.get("battery_safety", 0.0), "locker_overflow_delta": rc.get("locker_overflow", 0.0), "terminal_undelivered_penalty": rc.get("terminal_penalty", 0.0), "feasible_action_mask": mask.tolist(), "passenger_service": service, "dwell_components": {"passenger_dwell_min": passenger_dwell_min, "freight_dwell_min": freight_dwell_min, "charging_duration_min": charging_duration_min, "realized_dwell_min": realized_dwell_min, "additional_dwell_min": additional_dwell_min, "affected_passengers": affected_passengers, "event_passenger_delay": event_passenger_delay}, "departure_time_min": dep, "bus_operating_delay_delta": additional_dwell_min}
+        return self._build_obs_for_current_event(), float(reward), terminated, False, {"executed_action_index": ex_idx, "executed_duration": dur, "executed_duration_min": dur / 60.0, "selected_action": int(action_index), "requested_action": int(action_index), "executed_action": int(ex_idx), "action_repaired": ex_idx != action_index, "was_action_repaired": ex_idx != action_index, "invalid_action": invalid_action, "invalid_action_count": int(self.episode_metrics.get("invalid_action_count", 0)), "action_repair_count": int(self.episode_metrics.get("action_repair_count", 0)), "repair_reason": repair_reason, "feasible_action_count": feasible_count, "termination_reason": reason, "reward_components": rc, "event": e, "unloaded_parcels": unload_ids, "unloading_volume_kg": qf, "unloading_duration_min": qf * unloading_time_per_kg_min, "parcel_release_time_min": release_time, "current_trip_id": bus["trip_id"], "current_bus_id": bus["trip_id"], "current_station_id": st["station_id"], "transition_start_time": transition_start_time, "transition_end_time": float(self.state.get("time", dep)), "passenger_delay_delta": rc.get("passenger_delay", 0.0), "parcel_lateness_delta": rc.get("parcel_lateness", 0.0) - rc.get("terminal_penalty", 0.0), "late_delivery_count_delta": rc.get("late_delivery_count_delta", 0.0), "delivered_count_delta": rc.get("delivered_count_delta", 0.0), "undelivered_terminal_count": undelivered_terminal_count, "energy_consumption_delta": rc.get("total_energy_kwh", 0.0), "power_overload_delta": rc.get("power_overload", 0.0), "battery_violation_delta": rc.get("battery_safety", 0.0), "locker_overflow_delta": rc.get("locker_overflow", 0.0), "terminal_undelivered_penalty": rc.get("terminal_penalty", 0.0), "feasible_action_mask": mask.tolist(), "passenger_service": service, "dwell_components": {"passenger_dwell_min": passenger_dwell_min, "freight_dwell_min": freight_dwell_min, "charging_duration_min": charging_duration_min, "realized_dwell_min": realized_dwell_min, "additional_dwell_min": additional_dwell_min, "affected_passengers": affected_passengers, "event_passenger_delay": event_passenger_delay}, "departure_time_min": dep, "bus_operating_delay_delta": additional_dwell_min}
 
     def _refresh_global_state_features(self):
         now = float(self.state.get("time", 0.0))
