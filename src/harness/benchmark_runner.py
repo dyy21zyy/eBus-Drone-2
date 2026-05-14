@@ -10,6 +10,7 @@ from src.rl.agents.am_ddqn_dr_agent import AMDDQNDRAgent
 from src.rl.agents.ddqn_dr_agent import DDQNDRAgent
 from src.rl.agents.dqn_dr_agent import DQNDRAgent
 from src.policies import BatteryThresholdPolicy, DwellGreedyPolicy, LearnedPolicy, MaxFeasiblePolicy, NoChargingPolicy, UniformPolicy
+from src.utils.metrics import REQUIRED_PAPER_METRICS
 
 AGENT_MAP={"dqn_dr":DQNDRAgent,"ddqn_dr":DDQNDRAgent,"am_ddqn_dr":AMDDQNDRAgent,"proposed":AMDuelingDDQNDRAgent,"am_dueling_ddqn_dr":AMDuelingDDQNDRAgent}
 
@@ -57,15 +58,19 @@ def run_benchmark(methods, out_csv: str, env_builder, instance_name:str, test_se
             env = env_builder(seed)
             t0=time.time()
             pol = build_policy(m, env, out_root=cfg['paths']['outputs'], train_if_missing=train_if_missing, smoke_test=smoke_test, cfg=cfg, seed=seed, instance_name=instance_name)
-            met=evaluate_policy(env, pol, episodes=1, max_steps=10 if smoke_test else None)
+            met=evaluate_policy(env, pol, episodes=1, max_steps=10 if smoke_test else None, allow_debug_truncation=bool(smoke_test))
             met.update({'method':m,'instance':instance_name,'seed':seed,'runtime_sec':time.time()-t0,'smoke':bool(smoke_test),'smoke_mode':bool(smoke_test)})
             rows.append(met)
     if not rows: raise ValueError('Benchmark produced no rows.')
     for m in methods:
         if not any(r['method']==m for r in rows): raise ValueError(f'No results for method: {m}')
     p=Path(out_csv); p.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = list(dict.fromkeys(k for r in rows for k in r.keys()))
+    for metric in REQUIRED_PAPER_METRICS:
+        if metric not in fieldnames:
+            fieldnames.append(metric)
     with p.open('w',newline='',encoding='utf-8') as f:
-        w=csv.DictWriter(f,fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
+        w=csv.DictWriter(f,fieldnames=fieldnames); w.writeheader(); w.writerows(rows)
     agg={m:aggregate([r for r in rows if r['method']==m]) for m in methods}
     Path(out_csv).with_suffix('.json').write_text(json.dumps({'metadata':{'instance':instance_name,'seeds':test_seeds,'methods':methods},'aggregated':agg}, indent=2), encoding='utf-8')
     return rows

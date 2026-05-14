@@ -3,13 +3,14 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 from src.utils.metrics import REQUIRED_PAPER_METRICS, init_metrics, finalize_metrics
+from src.harness.result_validation import validate_episode_result
 
 def _required_component(rc: dict, key: str) -> float:
     if key not in rc:
         raise KeyError(f"Missing reward component in info['reward_components']: {key}")
     return float(rc[key])
 
-def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None):
+def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None, *, allow_debug_truncation: bool = False):
     metrics = init_metrics()
     min_bat = float("inf")
     termination_reason = None
@@ -99,21 +100,23 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
     out = finalize_metrics(metrics)
     out['max_steps'] = max_steps
     out['episode_end_time'] = end_time
-    out['operating_horizon'] = float(getattr(env, 'horizon', getattr(env, 'state', {}).get('horizon', 0.0)))
-    out['termination_reason'] = termination_reason or ('horizon_reached' if out['episode_end_time'] >= out['operating_horizon'] else 'unknown')
+    out['operating_horizon_min'] = float(getattr(env, 'horizon', getattr(env, 'state', {}).get('horizon', 0.0)))
+    out['termination_reason'] = termination_reason or ('horizon_reached' if out['episode_end_time'] >= out['operating_horizon_min'] else 'unknown')
+    out['truncated_by_max_steps'] = bool(truncated_by_max_steps)
     out['full_horizon_completed'] = bool(terminated_by_env and out['termination_reason'] == 'horizon_reached' and not truncated_by_max_steps)
-    if out['episode_end_time'] > out['operating_horizon'] + 1e-6:
-        raise RuntimeError(f"Episode exceeded operating horizon: {out['episode_end_time']} > {out['operating_horizon']}")
-    if out['termination_reason'] == 'horizon_reached' and abs(out['episode_end_time'] - out['operating_horizon']) > 1e-6:
-        raise RuntimeError(f"Horizon termination must end at horizon: {out['episode_end_time']} vs {out['operating_horizon']}")
+    out['operating_horizon'] = out['operating_horizon_min']
     missing = [k for k in REQUIRED_PAPER_METRICS if k not in out]
     if missing:
         raise KeyError(f"Missing required paper metrics in evaluator output: {missing}")
-    return out
+    return validate_episode_result(out, allow_debug_truncation=allow_debug_truncation)
 
 def save_eval_metrics(rows: list[dict], out_csv: str):
     p = Path(out_csv); p.parent.mkdir(parents=True, exist_ok=True)
     if not rows:
         raise ValueError('Evaluation produced no rows.')
+    fieldnames = list(dict.fromkeys(k for r in rows for k in r.keys()))
+    for metric in REQUIRED_PAPER_METRICS:
+        if metric not in fieldnames:
+            fieldnames.append(metric)
     with p.open('w', newline='', encoding='utf-8') as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
+        w = csv.DictWriter(f, fieldnames=fieldnames); w.writeheader(); w.writerows(rows)
