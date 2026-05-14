@@ -217,9 +217,76 @@ def _export_tables(output_dir: Path, experiment_name: str, include_smoke: bool =
         _write_table(_agg(rows_all, ["instance", "method"]), output_dir / "tables" / "scalability_summary.csv", output_dir / "tables" / "scalability_summary.tex")
 
 
+
+
+def _has_non_smoke_results(output_root: Path) -> bool:
+    for csv_path in (output_root / "results").glob("**/*.csv"):
+        rows = list(csv.DictReader(csv_path.open("r", encoding="utf-8")))
+        for row in rows:
+            is_smoke = str(row.get("smoke_mode", row.get("smoke", "false"))).lower() in {"1", "true", "yes"}
+            if not is_smoke:
+                return True
+    return False
+
+
+def _run_formal_preflight(plan: dict, args: argparse.Namespace, cfg: dict):
+    if plan.get("smoke"):
+        raise ValueError("Formal experiment preflight failed: smoke must be false.")
+    if plan.get("max_steps") is not None:
+        raise ValueError("Formal experiment preflight failed: max_steps must be None for full-horizon runs.")
+    if not REQUIRED_PAPER_METRICS:
+        raise ValueError("Formal experiment preflight failed: required metrics list is empty.")
+    if not plan.get("seeds"):
+        raise ValueError("Formal experiment preflight failed: random seed list must be non-empty.")
+    if not plan.get("methods"):
+        raise ValueError("Formal experiment preflight failed: method list must be non-empty.")
+    if any(int(s) <= 0 for s in plan["seeds"]):
+        raise ValueError(f"Formal experiment preflight failed: invalid seeds {plan['seeds']}.")
+    if any(not str(i).strip() for i in plan["instances"]):
+        raise ValueError("Formal experiment preflight failed: instance size/name must be non-empty.")
+    output_root = Path(cfg['paths']['outputs'])
+    if (output_root / 'results').exists() and not _has_non_smoke_results(output_root):
+        raise ValueError("Formal experiment preflight failed: output directory contains only smoke/stale smoke results.")
+
+
+def _run_smoke_validation(cfg: dict, args: argparse.Namespace):
+    smoke_cfg = deepcopy(cfg)
+    smoke_cfg['paths']['outputs'] = str(Path(cfg['paths']['outputs']) / 'smoke')
+    instance = 'small'
+    seed = 1
+    run_generate(smoke_cfg, instance, seed)
+    run_offline(smoke_cfg, instance, seed)
+    env = build_env(smoke_cfg, instance, seed, True)
+    obs, _ = env.reset(seed=seed)
+    if obs is None or len(obs) == 0:
+        raise ValueError('Smoke validation failed: environment reset did not return a valid observation.')
+    mask = env.get_action_mask()
+    if mask is None or len(mask) == 0 or sum(1 for v in mask if int(v) > 0) <= 0:
+        raise ValueError('Smoke validation failed: action mask has no feasible action.')
+    _, _, _, _, info = env.step(0)
+    if 'reward_components' not in info:
+        raise KeyError('Smoke validation failed: env.step() info missing reward_components.')
+    if not isinstance(info['reward_components'], dict):
+        raise TypeError('Smoke validation failed: reward_components must be a dict.')
+    from src.low_level.drone_dispatch_solver import solve_station_dispatch
+    assignments, n_assigned = solve_station_dispatch(idle_drone_ids=['d1'], full_batteries=1, feasible_waiting=[{'id': 1, 'request_time': 0.0, 'deadline': 10.0}], now=0.0)
+    if n_assigned <= 0 or not assignments:
+        raise ValueError('Smoke validation failed: low-level dispatch could not assign parcel with available drone and battery.')
+    rows = []
+    _run_eval(smoke_cfg, instance, seed, 'uniform_30', args, rows)
+    missing = [k for k in REQUIRED_PAPER_METRICS if k not in rows[0]]
+    if missing:
+        raise KeyError(f'Smoke validation failed: missing required paper metrics: {missing}')
+    out = Path(smoke_cfg['paths']['outputs']) / 'metrics' / 'validate_pipeline.csv'
+    save_eval_metrics(rows, str(out))
+    content = out.read_text(encoding='utf-8').strip()
+    if not content or 'smoke' not in content.lower():
+        raise ValueError('Smoke validation failed: result writer did not produce non-empty smoke output.')
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--mode', required=True, choices=['generate', 'offline', 'train', 'eval', 'benchmark', 'ablation', 'sensitivity', 'pipeline', 'export_tables'])
+    ap.add_argument('--mode', required=True, choices=['generate', 'offline', 'train', 'eval', 'benchmark', 'ablation', 'sensitivity', 'pipeline', 'validate_pipeline', 'export_tables'])
     ap.add_argument('--experiment', choices=['overall', 'ablation', 'scalability', 'sensitivity'])
     ap.add_argument('--config', required=True)
     ap.add_argument('--instance', default='small')
@@ -274,11 +341,16 @@ def main():
                 _run_eval(cfg, i, seed, plan['methods'][0], args, rows)
         out = Path(cfg['paths']['outputs']) / 'metrics' / f"eval_{plan['methods'][0]}_{plan['instances'][0]}.csv"
         save_eval_metrics(rows, str(out)); print(json.dumps(rows)); return
+    if args.mode == 'validate_pipeline':
+        _run_smoke_validation(cfg, args)
+        return
     if args.mode in ('benchmark', 'ablation', 'sensitivity', 'pipeline'):
         if args.smoke:
             cfg['paths']['outputs'] = str(Path(cfg['paths']['outputs']) / 'smoke')
         elif args.max_steps is not None and not args.allow_truncated_for_testing:
             raise ValueError("Formal experiments require full horizon with --max-steps unset. Use --allow-truncated-for-testing to override for tests.")
+        if args.mode in ('benchmark', 'ablation', 'sensitivity') and not args.allow_truncated_for_testing:
+            _run_formal_preflight(plan, args, cfg)
         if args.mode == 'pipeline':
             for i in plan['instances']:
                 for s in plan['seeds']:
