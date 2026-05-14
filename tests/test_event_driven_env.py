@@ -315,3 +315,36 @@ def test_stop_indicator_consistent_with_stored_event_and_unloading():
     _, _, _, _, info = env.step(0)
     realized = bool(info["passenger_service"]["chi"] or info["unloading_volume_kg"] > 0.0)
     assert realized is expected
+
+def test_terminal_undelivered_uses_completion_time_cutoff():
+    env = _build_env(seed=30)
+    t_end = float(env.horizon)
+    pid = next(iter(env.parcel_states))
+    p = env.parcel_states[pid]
+    p["status"] = "assigned_to_drone"
+    p["delivery_completion_time_min"] = t_end - 1e-6
+    assert len(env._terminal_undelivered_parcels(t_end)) == len(env.parcel_states) - 1
+    p["delivery_completion_time_min"] = t_end + 1e-6
+    assert len(env._terminal_undelivered_parcels(t_end)) == len(env.parcel_states)
+
+
+def test_terminal_penalty_applied_once_and_updates_reward_cost():
+    env = _build_env(seed=31)
+    env.current_decision_event = None
+    env.state["time"] = env.horizon
+    term, reason = True, "horizon_reached"
+    undelivered = env._terminal_undelivered_parcels(env.horizon)
+    p1 = env.episode_metrics["terminal_penalty"]
+    t1 = env._build_transition_reward(env._snapshot_cumulative_metrics(), env._snapshot_cumulative_metrics(), 0.0)[1]
+    penalty = 0.0
+    if term:
+        from src.env.termination import apply_terminal_penalty_once
+        penalty = apply_terminal_penalty_once(env.__dict__, undelivered, env.horizon, float(env.config.get("reward", {}).get("eta_l_term", 1.0)), float(env.config.get("reward", {}).get("eta_u_term", 1.0)))
+    assert penalty >= 0.0
+    penalty2 = apply_terminal_penalty_once(env.__dict__, undelivered, env.horizon, 1.0, 1.0)
+    assert penalty2 == 0.0
+    reward, rc = env._build_transition_reward(env._snapshot_cumulative_metrics(), env._snapshot_cumulative_metrics(), penalty)
+    assert rc["terminal_penalty"] == penalty
+    assert rc["total_cost"] >= t1["total_cost"]
+    assert reward == -rc["total_cost"]
+    assert env.episode_metrics["terminal_penalty"] == p1

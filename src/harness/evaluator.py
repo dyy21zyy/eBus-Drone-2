@@ -78,12 +78,11 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
                 break
 
     metrics['minimum_bus_battery'] = 0.0 if min_bat == float('inf') else min_bat
-    metrics['undelivered_parcel_count'] = float(terminal_undelivered_count_total) if terminal_undelivered_count_total > 0.0 else (float(sum(1 for p in env.parcel_states.values() if p.get('status') != 'delivered')) if hasattr(env, 'parcel_states') else 0.0)
     end_time = float(getattr(env, 'state', {}).get('time', 0.0))
+    metrics['undelivered_parcel_count'] = float(terminal_undelivered_count_total) if terminal_undelivered_count_total > 0.0 else (float(sum(1 for p in env.parcel_states.values() if p.get('delivery_completion_time_min') is None or float(p.get('delivery_completion_time_min')) > end_time + 1e-9)) if hasattr(env, 'parcel_states') else 0.0)
     delivered_parcels = [
         p for p in getattr(env, 'parcel_states', {}).values()
-        if p.get('status') == 'delivered'
-        and p.get('delivery_completion_time_min') is not None
+        if p.get('delivery_completion_time_min') is not None
         and float(p.get('delivery_completion_time_min')) <= end_time + 1e-9
     ]
     locker_holding_times = [float(p['locker_holding_time_min']) for p in delivered_parcels if p.get('locker_holding_time_min') is not None]
