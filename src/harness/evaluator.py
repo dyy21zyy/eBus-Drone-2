@@ -71,6 +71,11 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
             metrics['total_bus_operating_delay'] += float(info.get('bus_operating_delay_delta', extra_dwell))
             metrics['steps'] += 1
             metrics['repaired_actions'] += int(info.get('action_repaired', False))
+            metrics['invalid_action_count'] += float(info.get('invalid_action', False))
+            metrics['action_repair_count'] += float(info.get('was_action_repaired', info.get('action_repaired', False)))
+            metrics['requested_action_sum'] += float(info.get('requested_action', action))
+            metrics['executed_action_sum'] += float(info.get('executed_action', action))
+            metrics['action_gap_sum'] += abs(float(info.get('requested_action', action)) - float(info.get('executed_action', action)))
             min_bat = min(min_bat, float(env.state.get('battery', 0)))
             if terminated or truncated:
                 terminated_by_env = bool(terminated)

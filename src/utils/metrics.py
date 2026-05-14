@@ -21,7 +21,7 @@ REQUIRED_VALIDATION_FIELDS = [
 
 def init_metrics():
     m = {k: 0.0 for k in REQUIRED_PAPER_METRICS}
-    m.update({"steps": 0.0, "infeasible_actions": 0.0, "repaired_actions": 0.0, "executed_dur": 0.0})
+    m.update({"steps": 0.0, "infeasible_actions": 0.0, "repaired_actions": 0.0, "requested_action_sum": 0.0, "executed_action_sum": 0.0, "action_gap_sum": 0.0, "invalid_action_count": 0.0, "action_repair_count": 0.0})
     return m
 
 
@@ -29,5 +29,9 @@ def finalize_metrics(m: dict):
     steps = max(1, int(m.get("steps", 0)))
     m["average_excess_dwell_time"] = float(m.get("average_excess_dwell_time", 0.0)) / steps
     m["infeasible_action_rate"] = m.get("infeasible_actions", 0.0) / steps
-    m["action_repair_rate"] = m.get("repaired_actions", 0.0) / steps
+    repairs = float(m.get("action_repair_count", m.get("repaired_actions", 0.0)))
+    m["action_repair_rate"] = repairs / steps
+    m["mean_requested_action"] = float(m.get("requested_action_sum", 0.0)) / steps
+    m["mean_executed_action"] = float(m.get("executed_action_sum", 0.0)) / steps
+    m["mean_action_gap_after_repair"] = float(m.get("action_gap_sum", 0.0)) / steps
     return m
