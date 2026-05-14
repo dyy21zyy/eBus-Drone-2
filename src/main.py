@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 from copy import deepcopy
 from pathlib import Path
 
@@ -111,26 +112,109 @@ def _run_eval(cfg, instance, seed, method, args, rows):
     rows.append(m)
 
 
-def _export_tables(output_dir: Path, experiment_name: str):
-    src_csv = output_dir / "results" / experiment_name / "summary.csv"
-    _require_exists(src_csv, f"Missing results CSV for export_tables: {src_csv}")
-    rows = list(csv.DictReader(src_csv.open("r", encoding="utf-8")))
-    if not rows:
-        raise ValueError("Empty results: export_tables requires non-empty metrics rows.")
-    missing = [k for k in REQUIRED_PAPER_METRICS if k not in rows[0]]
-    if missing:
-        raise KeyError(f"Missing metrics for export_tables: {missing}")
-    out_csv = output_dir / "tables" / f"{experiment_name}_paper.csv"
-    out_tex = output_dir / "tables" / f"{experiment_name}_paper.tex"
-    out_csv.parent.mkdir(parents=True, exist_ok=True)
-    with out_csv.open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=rows[0].keys())
-        w.writeheader(); w.writerows(rows)
-    tex_lines = ["\\begin{tabular}{lrr}", "method & total_reward & total_cost \\\\", "\\hline"]
-    for r in rows:
-        tex_lines.append(f"{r['method']} & {r.get('total_reward','')} & {r.get('total_cost','')} \\\\")
-    tex_lines.append("\\end{tabular}")
-    out_tex.write_text("\n".join(tex_lines), encoding="utf-8")
+def _export_tables(output_dir: Path, experiment_name: str, include_smoke: bool = False):
+    def _read_rows(path: Path):
+        _require_exists(path, f"Missing results CSV for export_tables: {path}")
+        out_rows = list(csv.DictReader(path.open("r", encoding="utf-8")))
+        if not out_rows:
+            raise ValueError(f"Empty results: export_tables requires non-empty metrics rows: {path}")
+        return out_rows
+
+    def _validate_required(rows, *, experiment: str, instance: str, path: Path):
+        missing = [k for k in REQUIRED_PAPER_METRICS if k not in rows[0]]
+        if missing:
+            raise KeyError(f"Missing metrics for export_tables at {path} (experiment={experiment}, instance={instance}): {missing}")
+
+    def _is_full_horizon(row):
+        if not include_smoke and str(row.get("smoke_mode", row.get("smoke", "false"))).lower() in {"1", "true", "yes"}:
+            return False
+        if str(row.get("offline_status", "")).lower() in {"failed", "infeasible"}:
+            return False
+        if str(row.get("full_horizon_completed", "false")).lower() in {"1", "true", "yes"}:
+            return True
+        return False
+
+    def _agg(rows, group_keys):
+        grouped = {}
+        for r in rows:
+            key = tuple(r.get(k, "") for k in group_keys)
+            grouped.setdefault(key, []).append(r)
+        out = []
+        for key, rs in grouped.items():
+            rec = {k: v for k, v in zip(group_keys, key)}
+            rec["successful_full_horizon_runs"] = sum(1 for r in rs if _is_full_horizon(r))
+            rec["failed_or_truncated_runs"] = len(rs) - rec["successful_full_horizon_runs"]
+            for m in REQUIRED_PAPER_METRICS:
+                vals = []
+                for r in rs:
+                    if not _is_full_horizon(r):
+                        continue
+                    try:
+                        vals.append(float(r[m]))
+                    except (TypeError, ValueError):
+                        continue
+                if not vals:
+                    rec[f"{m}_mean"] = "MISSING"
+                    rec[f"{m}_std"] = "MISSING"
+                else:
+                    mean = sum(vals) / len(vals)
+                    std = math.sqrt(sum((v - mean) ** 2 for v in vals) / len(vals))
+                    rec[f"{m}_mean"] = f"{mean:.6g}"
+                    rec[f"{m}_std"] = f"{std:.6g}"
+            out.append(rec)
+        return out
+
+    def _write_table(rows, out_csv: Path, out_tex: Path):
+        if not rows:
+            raise ValueError(f"No aggregated rows for export: {out_csv}")
+        out_csv.parent.mkdir(parents=True, exist_ok=True)
+        fields = list(rows[0].keys())
+        with out_csv.open("w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=fields)
+            w.writeheader()
+            w.writerows(rows)
+        header = " & ".join(fields) + " \\\\"
+        tex = ["\\begin{tabular}{" + "l" * len(fields) + "}", header, "\\hline"]
+        for r in rows:
+            tex.append(" & ".join(str(r.get(c, "")) for c in fields) + " \\\\")
+        tex.append("\\end{tabular}")
+        out_tex.write_text("\n".join(tex), encoding="utf-8")
+
+    exp_root = output_dir / "results"
+    if experiment_name in {"benchmark", "overall"}:
+        bench_root = exp_root / "benchmark"
+        instance_files = list(bench_root.glob("*/summary.csv"))
+        if not instance_files and (bench_root / "summary.csv").exists():
+            rows = _read_rows(bench_root / "summary.csv")
+            _validate_required(rows, experiment="benchmark", instance="unknown", path=bench_root / "summary.csv")
+            _write_table(_agg(rows, ["instance", "method"]), output_dir / "tables" / "benchmark_overall.csv", output_dir / "tables" / "benchmark_overall.tex")
+            return
+        for p in instance_files:
+            instance = p.parent.name
+            rows = _read_rows(p)
+            _validate_required(rows, experiment="benchmark", instance=instance, path=p)
+            _write_table(_agg(rows, ["method"]), output_dir / "tables" / f"benchmark_{instance}_overall.csv", output_dir / "tables" / f"benchmark_{instance}_overall.tex")
+    if experiment_name == "ablation":
+        for p in (exp_root / "ablation").glob("*/summary.csv"):
+            instance = p.parent.name
+            rows = _read_rows(p)
+            _validate_required(rows, experiment="ablation", instance=instance, path=p)
+            _write_table(_agg(rows, ["method"]), output_dir / "tables" / f"ablation_{instance}.csv", output_dir / "tables" / f"ablation_{instance}.tex")
+    if experiment_name == "sensitivity":
+        for p in (exp_root / "sensitivity").glob("*/*.csv"):
+            instance = p.parent.name
+            factor = p.stem
+            rows = _read_rows(p)
+            _validate_required(rows, experiment="sensitivity", instance=instance, path=p)
+            _write_table(_agg(rows, ["method", "sensitivity_value"]), output_dir / "tables" / f"sensitivity_{instance}_{factor}.csv", output_dir / "tables" / f"sensitivity_{instance}_{factor}.tex")
+    if experiment_name == "scalability":
+        rows_all = []
+        for p in (exp_root / "scalability").glob("*/summary.csv"):
+            instance = p.parent.name
+            rows = _read_rows(p)
+            _validate_required(rows, experiment="scalability", instance=instance, path=p)
+            rows_all.extend(rows)
+        _write_table(_agg(rows_all, ["instance", "method"]), output_dir / "tables" / "scalability_summary.csv", output_dir / "tables" / "scalability_summary.tex")
 
 
 def main():
@@ -153,6 +237,7 @@ def main():
     ap.add_argument('--allow-truncated-for-testing', action='store_true')
     ap.add_argument('--output-dir')
     ap.add_argument('--overwrite', action='store_true')
+    ap.add_argument('--include-smoke', action='store_true')
     args = ap.parse_args()
     if args.smoke_test:
         args.smoke = True
@@ -215,7 +300,7 @@ def main():
                 run_sensitivity(plan['methods'], str(out), env_builder=lambda sd, c, _i=i: build_env(c, _i, sd, args.smoke), instance_name=i, test_seeds=plan['seeds'], cfg=cfg, factor=args.sensitivity, values=vals, smoke_test=args.smoke, train_if_missing=args.train_if_missing)
         return
     if args.mode == 'export_tables':
-        _export_tables(Path(cfg['paths']['outputs']), args.experiment or 'benchmark')
+        _export_tables(Path(cfg['paths']['outputs']), args.experiment or 'benchmark', include_smoke=bool(args.include_smoke))
         return
 
 
