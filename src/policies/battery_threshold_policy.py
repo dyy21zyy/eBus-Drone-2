@@ -13,8 +13,8 @@ class BatteryThresholdPolicy(BasePolicy):
         if not feasible:
             return 0
         if e <= e_min + 10:
-            return max(feasible)
+            return self.clip_to_feasible(max(feasible), action_mask)
         if e >= 0.8 * e_max:
-            return 0 if action_mask[0] == 1 else feasible[0]
+            return self.clip_to_feasible(0, action_mask)
         target = 60
-        return min(feasible, key=lambda i: abs(A_FULL[i] - target))
+        return self.clip_to_feasible(min(feasible, key=lambda i: abs(A_FULL[i] - target)), action_mask)

@@ -12,7 +12,4 @@ class UniformPolicy(BasePolicy):
 
     def select_action(self, observation: np.ndarray, action_mask: np.ndarray, info=None) -> int:
         _ = observation, info
-        if action_mask[self.index] == 1:
-            return self.index
-        feasible = [i for i, v in enumerate(action_mask.tolist()) if v == 1]
-        return feasible[0] if feasible else 0
+        return self.clip_to_feasible(self.index, action_mask)
