@@ -103,6 +103,14 @@ class EBusDroneEnv:
         self.obs_schema = {"trip_ids": self.trip_ids, "station_ids": self.station_ids, "stop_ids": self.stop_ids, "battery_capacity_kwh": cap, "passenger_capacity": float(self.config.get("bus", {}).get("passenger_capacity", 80)), "freight_capacity_kg": float(self.config.get("bus", {}).get("freight_capacity_kg", 20.0)), "locker_capacity_kg": max(float(s["locker_capacity_kg"]) for s in self.instance["stations"]["stations"]), "drones_per_station": max(int(s["drones"]) for s in self.instance["stations"]["stations"]), "chargers_per_station": max(int(s["chargers"]) for s in self.instance["stations"]["stations"]), "station_power_capacity_kw": max(float(s["station_power_capacity_kw"]) for s in self.instance["stations"]["stations"]), "battery_inv_norm": float(max(1, self.instance.get("battery", {}).get("initial_fully_charged_per_station", 6))), "urgency_count_norm": 20.0, "queue_norm": 100.0, "horizon": self.horizon}
         self.observation_feature_names = build_feature_names(self.obs_schema)
 
+
+    def _parcel_delivered_by_time(self, parcel: dict, t_eval: float) -> bool:
+        completion = parcel.get("delivery_completion_time_min")
+        return completion is not None and float(completion) <= float(t_eval) + 1e-9
+
+    def _terminal_undelivered_parcels(self, t_eval: float) -> list[dict]:
+        return [p for p in self.parcel_states.values() if not self._parcel_delivered_by_time(p, t_eval)]
+
     def _available_chargers(self, station_state, now):
         return sum(1 for t in station_state["charger_release_times_min"] if t <= now)
     def _active_bus_chargers(self, station_state, now):
@@ -279,12 +287,7 @@ class EBusDroneEnv:
 
     def _snapshot_cumulative_metrics(self) -> dict:
         now = float(self.state.get("time", 0.0))
-        delivered = [
-            p for p in self.parcel_states.values()
-            if p.get("status") == "delivered"
-            and p.get("delivery_completion_time_min") is not None
-            and float(p.get("delivery_completion_time_min")) <= now + 1e-9
-        ]
+        delivered = [p for p in self.parcel_states.values() if self._parcel_delivered_by_time(p, now)]
         parcel_lateness = sum(max(0.0, float(p["delivery_completion_time_min"]) - float(p.get("delivery_deadline_min", p.get("deadline_min", p["delivery_completion_time_min"])))) for p in delivered)
         late_delivery_count = sum(1 for p in delivered if float(p["delivery_completion_time_min"]) > float(p.get("delivery_deadline_min", p.get("deadline_min", p["delivery_completion_time_min"]))))
         energy_bus = sum(float(st.get("bus_charging_energy_kwh", 0.0)) for st in self.station_states.values())
@@ -445,8 +448,10 @@ class EBusDroneEnv:
             raise RuntimeError(f"Environment time exceeded operating horizon: {self.state['time']} > {self.horizon}")
         terminated, reason = check_termination(self.state, self.current_decision_event is not None)
         terminal_penalty = 0.0
+        terminal_eval_time = float(self.horizon if reason == "horizon_reached" else self.state["time"])
         if terminated:
-            terminal_penalty = apply_terminal_penalty_once(self.__dict__, [p for p in self.parcel_states.values() if p.get("status") != "delivered"], self.state["time"], float(self.config.get("reward", {}).get("eta_l_term", 1.0)), float(self.config.get("reward", {}).get("eta_u_term", 1.0)))
+            undelivered_terminal = self._terminal_undelivered_parcels(terminal_eval_time)
+            terminal_penalty = apply_terminal_penalty_once(self.__dict__, undelivered_terminal, terminal_eval_time, float(self.config.get("reward", {}).get("eta_l_term", 1.0)), float(self.config.get("reward", {}).get("eta_u_term", 1.0)))
             self.episode_metrics["terminal_penalty"] += terminal_penalty
         after_metrics = self._snapshot_cumulative_metrics()
         reward, rc = self._build_transition_reward(before_metrics, after_metrics, terminal_penalty)
@@ -454,7 +459,7 @@ class EBusDroneEnv:
         for k, v in rc.items():
             if isinstance(v, (int, float)):
                 sums[k] = float(sums.get(k, 0.0)) + float(v)
-        undelivered_terminal_count = float(sum(1 for p in self.parcel_states.values() if p.get("status") != "delivered")) if terminated else 0.0
+        undelivered_terminal_count = float(len(self._terminal_undelivered_parcels(terminal_eval_time))) if terminated else 0.0
         if terminated and reason == "horizon_reached" and abs(float(self.state.get("time", 0.0)) - float(self.horizon)) > 1e-6:
             raise RuntimeError(f"Horizon termination must end exactly at horizon: t={self.state.get('time')} horizon={self.horizon}")
         return self._build_obs_for_current_event(), float(reward), terminated, False, {"executed_action_index": ex_idx, "executed_duration": dur, "executed_duration_min": dur / 60.0, "selected_action": int(action_index), "executed_action": int(ex_idx), "action_repaired": ex_idx != action_index, "invalid_action": invalid_action, "invalid_action_count": int(self.episode_metrics.get("invalid_action_count", 0)), "termination_reason": reason, "reward_components": rc, "event": e, "unloaded_parcels": unload_ids, "unloading_volume_kg": qf, "unloading_duration_min": qf * unloading_time_per_kg_min, "parcel_release_time_min": release_time, "current_trip_id": bus["trip_id"], "current_bus_id": bus["trip_id"], "current_station_id": st["station_id"], "transition_start_time": transition_start_time, "transition_end_time": float(self.state.get("time", dep)), "passenger_delay_delta": rc.get("passenger_delay", 0.0), "parcel_lateness_delta": rc.get("parcel_lateness", 0.0) - rc.get("terminal_penalty", 0.0), "late_delivery_count_delta": rc.get("late_delivery_count_delta", 0.0), "delivered_count_delta": rc.get("delivered_count_delta", 0.0), "undelivered_terminal_count": undelivered_terminal_count, "energy_consumption_delta": rc.get("total_energy_kwh", 0.0), "power_overload_delta": rc.get("power_overload", 0.0), "battery_violation_delta": rc.get("battery_safety", 0.0), "locker_overflow_delta": rc.get("locker_overflow", 0.0), "terminal_undelivered_penalty": rc.get("terminal_penalty", 0.0), "feasible_action_mask": mask.tolist(), "passenger_service": service, "dwell_components": {"passenger_dwell_min": passenger_dwell_min, "freight_dwell_min": freight_dwell_min, "charging_duration_min": charging_duration_min, "realized_dwell_min": realized_dwell_min, "additional_dwell_min": additional_dwell_min, "affected_passengers": affected_passengers, "event_passenger_delay": event_passenger_delay}, "departure_time_min": dep, "bus_operating_delay_delta": additional_dwell_min}
