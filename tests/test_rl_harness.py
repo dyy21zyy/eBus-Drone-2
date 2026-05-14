@@ -5,13 +5,76 @@ from src.harness.benchmark_runner import build_policy, run_benchmark, normalize_
 from src.harness.sensitivity_runner import run_sensitivity
 from src.harness.evaluator import save_eval_metrics, evaluate_policy
 from src.policies.dwell_greedy_policy import DwellGreedyPolicy
+import csv
+
+
+class _LongEpisodeEnv:
+    def __init__(self, done_after: int = 5):
+        self.done_after = done_after
+        self.horizon_sec = 600.0
+        self.state = {"time": 0.0}
+        self._steps = 0
+
+    def reset(self, seed=None):
+        self._steps = 0
+        self.state = {"time": 0.0}
+        return [0.0, 0.0], {}
+
+    def get_action_mask(self):
+        return [1, 1]
+
+    def step(self, _action):
+        self._steps += 1
+        self.state["time"] = float(self._steps * 60.0)
+        done = self._steps >= self.done_after
+        reason = "horizon_reached" if done else None
+        return [0.0, 0.0], 0.0, done, False, {"termination_reason": reason, "reward_components": {}}
 
 
 def test_training_smoke_writes_checkpoint_and_log(tmp_path):
-    env = EBusDroneEnv(smoke_test=True)
+    env = _LongEpisodeEnv(done_after=5)
     train_agent(env, method='proposed', episodes=1, max_steps=2, smoke_test=True, out_root=str(tmp_path), cfg={'rl': {'episodes': 1, 'max_steps_per_episode': 2}}, seed=1, instance_name='small')
     assert (tmp_path / 'checkpoints' / 'proposed_small_seed_1.pt').exists()
     assert (tmp_path / 'metrics' / 'train_log_proposed_small_seed_1.csv').exists()
+
+
+def test_formal_training_ignores_max_steps_and_runs_to_done(tmp_path):
+    env = _LongEpisodeEnv(done_after=5)
+    train_agent(
+        env,
+        method='proposed',
+        episodes=1,
+        max_steps=2,
+        smoke_test=False,
+        out_root=str(tmp_path),
+        cfg={'rl': {'episodes': 1, 'max_steps_per_episode': 2}},
+        seed=1,
+        instance_name='small',
+    )
+    with (tmp_path / 'metrics' / 'train_log_proposed_small_seed_1.csv').open(newline='', encoding='utf-8') as f:
+        row = next(csv.DictReader(f))
+    assert int(row['episode_steps']) > 2
+    assert row['truncated_by_max_steps'].lower() == 'false'
+
+
+def test_smoke_training_allows_max_step_truncation_and_labels_non_paper_ready(tmp_path):
+    env = _LongEpisodeEnv(done_after=5)
+    train_agent(
+        env,
+        method='proposed',
+        episodes=1,
+        max_steps=2,
+        smoke_test=True,
+        out_root=str(tmp_path),
+        cfg={'rl': {'episodes': 1, 'max_steps_per_episode': 2}},
+        seed=1,
+        instance_name='small',
+    )
+    with (tmp_path / 'metrics' / 'train_log_proposed_small_seed_1.csv').open(newline='', encoding='utf-8') as f:
+        row = next(csv.DictReader(f))
+    assert row['truncated_by_max_steps'].lower() == 'true'
+    assert row['termination_reason'] == 'max_steps_truncated'
+    assert row['paper_ready_episode'].lower() == 'false'
 
 
 def test_missing_checkpoint_error(tmp_path):
