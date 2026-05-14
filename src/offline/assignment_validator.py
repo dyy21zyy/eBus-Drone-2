@@ -51,15 +51,22 @@ def summarize_assignment_flows(data: AssignmentData, result: AssignmentResult) -
     unloaded_by_trip_station = {(b, h): 0.0 for b in data.trips for h in data.stations}
     planned_drone_workload_by_station = {h: 0.0 for h in data.stations}
     locker_load = {(h, tau): 0.0 for h in data.stations for tau in data.t_grid}
+    bus_load_by_bus = {b: 0.0 for b in data.trips}
     for d in result.decisions:
         q = data.parcel_weight[d.customer_id]
         unloaded_by_trip_station[(d.trip_id, d.station_id)] += q
+        bus_load_by_bus[d.trip_id] += q
         planned_drone_workload_by_station[d.station_id] += data.t_hi_rt[(d.station_id, d.customer_id)]
         key = (d.trip_id, d.station_id, d.customer_id)
         for tau in data.t_grid:
             if data.r_bhi_0[key] <= tau < data.p_bhi_0[key]:
                 locker_load[(d.station_id, tau)] += q
     return {
+        "solver_status": result.status,
+        "objective_value": result.objective_value,
+        "assignment_count": len(result.decisions),
+        "assigned_customer_count": len({d.customer_id for d in result.decisions}),
+        "bus_load_kg_by_bus": {str(b): bus_load_by_bus[b] for b in data.trips},
         "unloaded_parcel_volume_kg_by_bus_station": {
             f"{b}-{h}": unloaded_by_trip_station[(b, h)] for b in data.trips for h in data.stations if unloaded_by_trip_station[(b, h)] > 0.0
         },
@@ -72,5 +79,9 @@ def summarize_assignment_flows(data: AssignmentData, result: AssignmentResult) -
         },
         "planned_drone_workload_by_station_min": {
             str(h): planned_drone_workload_by_station[h] for h in data.stations
+        },
+        "planned_drone_workload_summary_min": {
+            "total": float(sum(planned_drone_workload_by_station.values())),
+            "peak_station": float(max(planned_drone_workload_by_station.values()) if data.stations else 0.0),
         },
     }

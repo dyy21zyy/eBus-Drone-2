@@ -8,6 +8,7 @@ class AssignmentData:
     customers: list[int]
     trips: list[int]
     stations: list[int]
+    station_stop_by_id: dict[int, int]
     feasible_stations_by_customer: dict[int, set[int]]
     feasible_customers_by_station: dict[int, list[int]]
     parcel_weight: dict[int, float]
@@ -51,6 +52,9 @@ def build_assignment_data(instance: dict) -> AssignmentData:
     customers = [int(c["customer_id"]) for c in customers_raw]
     trips = [int(b["trip_id"]) for b in trips_raw]
     stations = [int(s["station_id"]) for s in stations_raw]
+    stop_ids = [int(s["stop_id"]) for s in instance["network"]["stops"]]
+    stop_index_by_id = {sid: idx for idx, sid in enumerate(stop_ids)}
+    station_stop_by_id = {int(s["station_id"]): int(s.get("stop_id", s["station_id"])) for s in stations_raw}
 
     station_by_id = {int(s["station_id"]): s for s in stations_raw}
     trip_departure = {int(b["trip_id"]): float(b["departure_min"]) for b in trips_raw}
@@ -95,11 +99,15 @@ def build_assignment_data(instance: dict) -> AssignmentData:
     for b in trips:
         dep = trip_departure[b]
         for h in stations:
-            # line route includes all stops in order.
-            delta_bh[(b, h)] = 1
-            station_dist_km = float(instance["network"]["distances_km"][0][h - 1])
+            stop_id = station_stop_by_id[h]
+            if stop_id not in stop_index_by_id:
+                raise ValueError(f"Station {h} references unknown stop_id={stop_id}")
+            stop_idx = stop_index_by_id[stop_id]
+            # On the default corridor route every trip visits every stop; this explicitly maps station->stop.
+            delta_bh[(b, h)] = 1 if stop_idx < len(travel[0]) else 0
+            station_dist_km = float(instance["network"]["distances_km"][0][stop_idx])
             c_b[(b, h)] = bus_cost_kgkm * station_dist_km
-            t_bh_0[(b, h)] = dep + float(travel[0][h - 1])
+            t_bh_0[(b, h)] = dep + float(travel[0][stop_idx])
             # T_bh_U_0 nominal unloading time for bus-trip/station event.
             # We keep this deterministic and configurable; by default we preserve the
             # prior conservative approximation derived from unloading capacity * sec/kg.
@@ -129,6 +137,7 @@ def build_assignment_data(instance: dict) -> AssignmentData:
 
     return AssignmentData(
         customers=customers, trips=trips, stations=stations,
+        station_stop_by_id=station_stop_by_id,
         feasible_stations_by_customer=feasible_stations_by_customer,
         feasible_customers_by_station=feasible_customers_by_station,
         parcel_weight=parcel_weight, deadline=deadline, q_f=q_f, q_u=q_u, k=k,

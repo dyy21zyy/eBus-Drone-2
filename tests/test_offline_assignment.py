@@ -121,3 +121,35 @@ def test_assignment_output_metadata():
     assert "unloaded_parcel_volume_kg_by_bus_station" in meta
     assert "planned_locker_occupancy_summary_kg" in meta
     assert "planned_drone_workload_by_station_min" in meta
+    assert "objective_value" in meta and meta["objective_value"] is not None
+    assert "solver_status" in meta and meta["solver_status"]
+    assert "bus_load_kg_by_bus" in meta and meta["bus_load_kg_by_bus"]
+    assert "planned_drone_workload_summary_min" in meta
+
+
+def test_station_id_can_differ_from_stop_id_for_arrival_mapping():
+    instance = _load_instance()
+    instance["stations"]["stations"][0]["station_id"] = 101
+    instance["stations"]["stations"][0]["stop_id"] = 1
+    old_id = instance["stations"]["station_ids"][0]
+    instance["stations"]["station_ids"][0] = 101
+    for c in instance["customers"]:
+        for opt in c["feasible_stations"]:
+            if opt["station_id"] == old_id:
+                opt["station_id"] = 101
+    data = build_assignment_data(instance)
+    trip_id = data.trips[0]
+    dep = instance["network"]["scheduled_bus_trips"][0]["departure_min"]
+    expected = dep + instance["network"]["nominal_travel_time_min"][0][0]
+    assert abs(data.t_bh_0[(trip_id, 101)] - expected) < 1e-9
+
+
+def test_generation_records_deadline_repair_metadata():
+    from src.utils.config import load_yaml
+    from src.data_generation.scenario_generator import generate_instance
+    cfg = load_yaml("configs/default.yaml")
+    inst_cfg = load_yaml("configs/instances/small.yaml")
+    generated = generate_instance(cfg, inst_cfg, 1)
+    meta = generated.get("generation_metadata", {})
+    assert meta.get("deadline_repair_policy") == "repair_to_min_completion"
+    assert "deadline_repaired" in meta

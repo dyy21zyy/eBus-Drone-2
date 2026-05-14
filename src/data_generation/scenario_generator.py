@@ -14,6 +14,7 @@ def generate_instance(config: dict, instance_cfg: dict, seed: int) -> dict:
     nominal_unloading = float(config["parcel"].get("nominal_unloading_time_min", (config["parcel"]["unloading_capacity_kg_per_stop"] * config["parcel"]["unloading_time_sec_per_kg"]) / 60.0))
     min_departure = min(float(t["departure_min"]) for t in network["scheduled_bus_trips"])
     travel = network["nominal_travel_time_min"][0]
+    deadline_repaired = False
     for c in customers["customers"]:
         min_completion = float("inf")
         for opt in c["feasible_stations"]:
@@ -24,6 +25,7 @@ def generate_instance(config: dict, instance_cfg: dict, seed: int) -> dict:
             min_completion = min(min_completion, completion)
         if c["delivery_deadline_min"] < min_completion:
             c["delivery_deadline_min"] = round(min_completion, 4)
+            deadline_repaired = True
     passenger = generate_passenger_parameters(config, network["stops"], seed)
     return {
         "instance_name": instance_cfg["name"],
@@ -39,6 +41,10 @@ def generate_instance(config: dict, instance_cfg: dict, seed: int) -> dict:
         "battery": config["battery"],
         "parcel": config["parcel"],
         "power": config["power"],
+        "generation_metadata": {
+            "deadline_repair_policy": "repair_to_min_completion",
+            "deadline_repaired": deadline_repaired,
+        },
     }
 
 
