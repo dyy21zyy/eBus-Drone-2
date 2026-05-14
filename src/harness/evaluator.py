@@ -68,7 +68,6 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
             )
             metrics['average_excess_dwell_time'] += extra_dwell
             metrics['total_bus_operating_delay'] += float(info.get('bus_operating_delay_delta', extra_dwell))
-            metrics['charger_utilization'] += float(info.get('executed_duration_min', 0.0))
             metrics['steps'] += 1
             metrics['repaired_actions'] += int(info.get('action_repaired', False))
             min_bat = min(min_bat, float(env.state.get('battery', 0)))
@@ -80,10 +79,17 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
 
     metrics['minimum_bus_battery'] = 0.0 if min_bat == float('inf') else min_bat
     metrics['undelivered_parcel_count'] = float(terminal_undelivered_count_total) if terminal_undelivered_count_total > 0.0 else (float(sum(1 for p in env.parcel_states.values() if p.get('status') != 'delivered')) if hasattr(env, 'parcel_states') else 0.0)
-    metrics['average_locker_holding_time'] = float(sum((p.get('locker_holding_time_min') or 0.0) for p in getattr(env, 'parcel_states', {}).values())) / max(1.0, float(len(getattr(env, 'parcel_states', {}))))
+    delivered_parcels = [p for p in getattr(env, 'parcel_states', {}).values() if p.get('status') == 'delivered']
+    locker_holding_times = [float(p['locker_holding_time_min']) for p in delivered_parcels if p.get('locker_holding_time_min') is not None]
+    metrics['average_locker_holding_time'] = float(sum(locker_holding_times)) / float(len(locker_holding_times)) if locker_holding_times else 0.0
     if metrics['total_bus_operating_delay'] <= 0.0:
         metrics['total_bus_operating_delay'] = float(sum(b.get('accumulated_operating_delay_min', 0.0) for b in getattr(env, 'bus_states', {}).values()))
-    metrics['drone_battery_stockout_count'] = float(sum(1 for st in getattr(env, 'station_states', {}).values() if st.get('full_batteries', 0) <= 0))
+    stations = list(getattr(env, 'station_states', {}).values())
+    occupied_time = sum(float(st.get('charger_occupied_time_min', 0.0)) for st in stations)
+    charger_capacity_time = sum(float(max(0, int(st.get('charging_slots', len(st.get('charger_release_times_min', [])) or 0)))) * float(getattr(env, 'horizon', getattr(env, 'state', {}).get('horizon', 0.0))) for st in stations)
+    metrics['charger_utilization'] = (occupied_time / charger_capacity_time) if charger_capacity_time > 0.0 else 0.0
+    # Definition: stockout frequency counts dispatch-trigger opportunities where waiting feasible parcels and idle drones exist but no full battery is available.
+    metrics['drone_battery_stockout_count'] = float(sum(float(st.get('dispatch_stockout_count', 0.0)) for st in stations))
 
     out = finalize_metrics(metrics)
     out['max_steps'] = max_steps
