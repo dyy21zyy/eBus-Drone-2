@@ -1,9 +1,10 @@
+import argparse
 import json
 from pathlib import Path
 
 import pytest
 
-from src.main import main
+from src.main import _run_formal_preflight, main
 from src.utils.metrics import REQUIRED_PAPER_METRICS
 
 
@@ -130,3 +131,32 @@ def test_export_tables_excludes_smoke_by_default(tmp_path, monkeypatch):
     main()
     txt = (out / 'tables' / 'benchmark_medium_overall.csv').read_text(encoding='utf-8')
     assert ',1,1,' in txt
+
+
+def test_validate_pipeline_writes_smoke_output(tmp_path, monkeypatch):
+    out = tmp_path / 'o'
+    _run(['--mode', 'validate_pipeline', '--config', 'configs/default.yaml', '--output-dir', str(out)], monkeypatch)
+    smoke_csv = out / 'smoke' / 'metrics' / 'validate_pipeline.csv'
+    assert smoke_csv.exists()
+    txt = smoke_csv.read_text(encoding='utf-8')
+    assert 'smoke' in txt and 'true' in txt.lower()
+
+
+def test_formal_benchmark_rejects_empty_method_list(tmp_path):
+    cfg = {'paths': {'outputs': str(tmp_path / 'o')}}
+    plan = {'smoke': False, 'max_steps': None, 'seeds': [1], 'methods': [], 'instances': ['small']}
+    with pytest.raises(ValueError, match='method list must be non-empty'):
+        _run_formal_preflight(plan, argparse.Namespace(), cfg)
+
+
+def test_export_tables_fails_on_missing_metric_not_empty_table(tmp_path, monkeypatch):
+    out = tmp_path / 'o'
+    p = out / 'results' / 'benchmark' / 'small'
+    p.mkdir(parents=True)
+    header = ['method', 'seed', 'full_horizon_completed', 'smoke_mode'] + REQUIRED_PAPER_METRICS[:-1]
+    row = ['proposed', '1', 'true', 'false'] + ['10'] * (len(REQUIRED_PAPER_METRICS) - 1)
+    (p / 'summary.csv').write_text(','.join(header) + '\n' + ','.join(row) + '\n', encoding='utf-8')
+    monkeypatch.setattr('sys.argv', ['prog', '--mode', 'export_tables', '--config', 'configs/default.yaml', '--output-dir', str(out), '--experiment', 'overall'])
+    with pytest.raises(KeyError, match='Missing metrics'):
+        main()
+    assert not (out / 'tables' / 'benchmark_small_overall.csv').exists()
