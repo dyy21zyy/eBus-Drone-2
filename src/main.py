@@ -107,7 +107,7 @@ def _run_eval(cfg, instance, seed, method, args, rows):
         pol = build_policy(method, env=env, out_root=cfg['paths']['outputs'], checkpoint=args.checkpoint, train_if_missing=args.train_if_missing, smoke_test=args.smoke, cfg=cfg, seed=seed, instance_name=instance)
     except TypeError:
         pol = build_policy(method)
-    m = evaluate_policy(env, pol, episodes=1, max_steps=args.max_steps if args.max_steps is not None else (10 if args.smoke else None))
+    m = evaluate_policy(env, pol, episodes=1, max_steps=args.max_steps if args.max_steps is not None else (10 if args.smoke else None), allow_debug_truncation=bool(args.smoke or args.allow_truncated_for_testing))
     m.update({'method': normalize_method_name(method), 'instance': instance, 'seed': seed, 'smoke': bool(args.smoke)})
     rows.append(m)
 

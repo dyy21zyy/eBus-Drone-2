@@ -10,6 +10,14 @@ REQUIRED_PAPER_METRICS = [
     "charger_utilization","drone_battery_stockout_count",
 ]
 
+REQUIRED_VALIDATION_FIELDS = [
+    "episode_end_time",
+    "operating_horizon_min",
+    "termination_reason",
+    "full_horizon_completed",
+    "truncated_by_max_steps",
+]
+
 
 def init_metrics():
     m = {k: 0.0 for k in REQUIRED_PAPER_METRICS}
