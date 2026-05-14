@@ -15,6 +15,7 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
     termination_reason = None
     terminated_by_env = False
     truncated_by_max_steps = False
+    terminal_undelivered_count_total = 0.0
     for ep in range(episodes):
         obs, _ = env.reset(seed=ep)
         step_idx = 0
@@ -56,7 +57,7 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
             metrics['station_power_overload_duration'] += _required_component(rc, 'power_overload_duration')
             metrics['locker_overflow_amount'] += _required_component(rc, 'locker_overflow_amount')
             metrics['locker_overflow_duration'] += _required_component(rc, 'locker_overflow_duration')
-            metrics['late_delivery_count'] += _required_component(rc, 'number_late_deliveries')
+            metrics['late_delivery_count'] += float(info.get('late_delivery_count_delta', _required_component(rc, 'number_late_deliveries')))
             metrics['battery_safety_violation_count'] += int(_required_component(rc, 'battery_safety') > 0)
             dwell = info.get('dwell_components', {})
             extra_dwell = float(
@@ -73,11 +74,12 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
             min_bat = min(min_bat, float(env.state.get('battery', 0)))
             if terminated or truncated:
                 terminated_by_env = bool(terminated)
+                terminal_undelivered_count_total += float(info.get('undelivered_terminal_count', 0.0))
                 termination_reason = info.get('termination_reason') or ('truncated' if truncated else termination_reason)
                 break
 
     metrics['minimum_bus_battery'] = 0.0 if min_bat == float('inf') else min_bat
-    metrics['undelivered_parcel_count'] = float(sum(1 for p in env.parcel_states.values() if p.get('status') != 'delivered')) if hasattr(env, 'parcel_states') else 0.0
+    metrics['undelivered_parcel_count'] = float(terminal_undelivered_count_total) if terminal_undelivered_count_total > 0.0 else (float(sum(1 for p in env.parcel_states.values() if p.get('status') != 'delivered')) if hasattr(env, 'parcel_states') else 0.0)
     metrics['average_locker_holding_time'] = float(sum((p.get('locker_holding_time_min') or 0.0) for p in getattr(env, 'parcel_states', {}).values())) / max(1.0, float(len(getattr(env, 'parcel_states', {}))))
     if metrics['total_bus_operating_delay'] <= 0.0:
         metrics['total_bus_operating_delay'] = float(sum(b.get('accumulated_operating_delay_min', 0.0) for b in getattr(env, 'bus_states', {}).values()))
