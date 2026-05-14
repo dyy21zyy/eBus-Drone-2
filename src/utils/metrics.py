@@ -20,7 +20,6 @@ def init_metrics():
 def finalize_metrics(m: dict):
     steps = max(1, int(m.get("steps", 0)))
     m["average_excess_dwell_time"] = float(m.get("average_excess_dwell_time", 0.0)) / steps
-    m["charger_utilization"] = float(m.get("charger_utilization", 0.0)) / steps
     m["infeasible_action_rate"] = m.get("infeasible_actions", 0.0) / steps
     m["action_repair_rate"] = m.get("repaired_actions", 0.0) / steps
     return m

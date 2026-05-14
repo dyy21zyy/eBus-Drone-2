@@ -37,10 +37,16 @@ def operate_station_step(station_state: dict, now: float, *, parcel_states: dict
     )
     assignments = []
     n_disp = 0
+    station_state["dispatch_opportunity_count"] = float(station_state.get("dispatch_opportunity_count", 0.0))
+    station_state["dispatch_stockout_count"] = float(station_state.get("dispatch_stockout_count", 0.0))
     if trigger:
         waiting = [parcel_states[int(pid)] for pid in station_state.get("locker_parcels", []) if int(pid) in parcel_states]
         feas = feasible_parcels(waiting, now, int(station_state.get("station_id", -1)), max_round_trip_duration)
         idle = idle_drone_ids(station_state)
+        if feas and idle:
+            station_state["dispatch_opportunity_count"] += 1.0
+            if int(station_state.get("full_batteries", 0)) <= 0:
+                station_state["dispatch_stockout_count"] += 1.0
         assignments, n_disp = solve_greedy_dispatch(idle, station_state.get("full_batteries", 0), feas, now, eta_l_d, eta_u_d)
         if n_disp > 0:
             consume_full_batteries(station_state, n_disp)
