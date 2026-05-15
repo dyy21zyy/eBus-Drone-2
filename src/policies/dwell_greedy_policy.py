@@ -15,5 +15,5 @@ class DwellGreedyPolicy(BasePolicy):
         target = self.dwell_scale * dwell_est
         feasible = [i for i, v in enumerate(action_mask.tolist()) if v == 1]
         candidates = [i for i in feasible if A_FULL[i] <= target]
-        proposal = max(candidates) if candidates else (max(feasible) if feasible else 0)
+        proposal = max(candidates) if candidates else 0
         return self.clip_to_feasible(proposal, action_mask)

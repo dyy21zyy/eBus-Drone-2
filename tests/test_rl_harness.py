@@ -243,3 +243,61 @@ def test_checkpoint_architecture_mismatch_raises_clear_error(tmp_path):
     ckpt_cfg.write_text(__import__('json').dumps(payload), encoding='utf-8')
     with pytest.raises(RuntimeError, match='architecture mismatch'):
         build_policy('am_dueling_ddqn_dr', env, out_root=str(tmp_path), train_if_missing=False, cfg=cfg, seed=13, instance_name='small')
+
+
+class _CapturePolicy:
+    def __init__(self):
+        self.last_info = None
+
+    def select_action(self, _obs, action_mask, info=None):
+        self.last_info = info or {}
+        infeasible = next((i for i, v in enumerate(action_mask) if v == 0), None)
+        return int(infeasible if infeasible is not None else 0)
+
+
+class _SingleStepInfoEnv:
+    def __init__(self, *, unloading_volume_kg: float = 0.0, safety_battery_kwh: float = 40.0):
+        self.state = {"time": 0.0}
+        self.config = {"bus": {"safety_battery_kwh": safety_battery_kwh, "battery_capacity_kwh": 160.0}}
+        self.instance = {"parcel": {"unloading_time_sec_per_kg": 3.0}}
+        self.bus_states = {0: {"battery_kwh": 80.0, "battery_capacity_kwh": 160.0}}
+        self.current_event = {"trip_id": 0, "unloading_volume_kg": unloading_volume_kg, "passenger_service_preview": {"passenger_dwell_min": 0.5}}
+
+    def reset(self, seed=None):
+        self.state = {"time": 0.0}
+        return [0.0], {}
+
+    def get_action_mask(self):
+        return [1, 0, 1]
+
+    def step(self, action):
+        _ = action
+        return [0.0], 0.0, True, False, {"termination_reason": "horizon_reached", "reward_components": {}}
+
+
+def test_evaluator_passes_nonzero_freight_dwell_estimate_when_unloading_exists():
+    env = _SingleStepInfoEnv(unloading_volume_kg=10.0)
+    pol = _CapturePolicy()
+    evaluate_policy(env, pol, episodes=1, max_steps=1, allow_debug_truncation=True)
+    assert pol.last_info["T_F"] > 0.0
+
+
+def test_evaluator_passes_configured_battery_safety_level():
+    env = _SingleStepInfoEnv(safety_battery_kwh=47.0)
+    pol = _CapturePolicy()
+    evaluate_policy(env, pol, episodes=1, max_steps=1, allow_debug_truncation=True)
+    assert pol.last_info["E_min"] == 47.0
+
+
+def test_rule_policies_only_select_feasible_actions():
+    env = EBusDroneEnv(smoke_test=True)
+    mask = env.get_action_mask()
+    obs, _ = env.reset(seed=1)
+    pol_dwell = DwellGreedyPolicy()
+    a_dwell = pol_dwell.select_action(obs, mask, {"T_P_est": 0.0, "T_F": 0.0})
+    assert mask[a_dwell] == 1
+
+    from src.policies.battery_threshold_policy import BatteryThresholdPolicy
+    pol_bat = BatteryThresholdPolicy()
+    a_bat = pol_bat.select_action(obs, mask, {"E_current": 0.0, "E_min": 40.0, "E_max": 160.0})
+    assert mask[a_bat] == 1
