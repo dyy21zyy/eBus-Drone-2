@@ -332,7 +332,17 @@ def main():
             for seed in plan['seeds']:
                 set_seed(seed, deterministic=bool(cfg.get('rl', {}).get('deterministic', False)))
                 env = build_env(cfg, i, seed, args.smoke)
-                train_agent(env, method=plan['methods'][0], episodes=args.episodes or (2 if args.smoke else 20), max_steps=args.max_steps if args.max_steps is not None else (10 if args.smoke else 100), smoke_test=args.smoke, out_root=cfg['paths']['outputs'], cfg=cfg, seed=seed, instance_name=i)
+                train_agent(
+                    env,
+                    method=plan['methods'][0],
+                    episodes=args.episodes if args.episodes is not None else (2 if args.smoke else None),
+                    max_steps=args.max_steps if args.max_steps is not None else (10 if args.smoke else None),
+                    smoke_test=args.smoke,
+                    out_root=cfg['paths']['outputs'],
+                    cfg=cfg,
+                    seed=seed,
+                    instance_name=i,
+                )
         return
     if args.mode == 'eval':
         rows = []

@@ -24,7 +24,7 @@ def _agent_cls(method: str):
     }.get(method, AMDuelingDDQNDRAgent)
 
 
-def train_agent(env, method: str = "proposed", episodes: int = 5, max_steps: int | None = 100, smoke_test: bool = False, out_root: str = "outputs", cfg: dict | None = None, seed: int = 0, instance_name: str = "unknown"):
+def train_agent(env, method: str = "proposed", episodes: int | None = 5, max_steps: int | None = 100, smoke_test: bool = False, out_root: str = "outputs", cfg: dict | None = None, seed: int | None = 0, instance_name: str = "unknown"):
     obs, _ = env.reset(seed=seed)
     cfg = dict(cfg or {})
     rl_cfg = dict(cfg.get("rl", {}))
@@ -33,15 +33,37 @@ def train_agent(env, method: str = "proposed", episodes: int = 5, max_steps: int
     rl_cfg.setdefault("target_update_interval", 10)
     rl_cfg.setdefault("replay_buffer_size", 2000)
     rl_cfg.setdefault("action_set_seconds", cfg.get("charging", {}).get("action_set_seconds", []))
+    cfg_method = rl_cfg.get("method")
+    if method is None:
+        method = cfg_method or "proposed"
+    cfg_seed = rl_cfg.get("seed")
+    if seed is None:
+        seed = int(cfg_seed) if cfg_seed is not None else 0
     cls = _agent_cls(method)
     agent = cls(len(obs), len(env.get_action_mask()), rl_cfg)
-    episodes = int(rl_cfg.get("episodes", episodes))
+    episodes = int(episodes) if episodes is not None else int(rl_cfg.get("episodes", 5))
     allow_train_truncation = bool(rl_cfg.get("allow_train_truncation", False))
-    cfg_max_steps = rl_cfg.get("max_steps_per_episode", max_steps)
+    cfg_max_steps = rl_cfg.get("max_steps_per_episode", 100)
+    resolved_max_steps = max_steps if max_steps is not None else cfg_max_steps
     if smoke_test or allow_train_truncation:
-        max_steps = int(cfg_max_steps) if cfg_max_steps is not None else None
+        max_steps = int(resolved_max_steps) if resolved_max_steps is not None else None
     else:
         max_steps = None
+    effective_cfg = {
+        "method": method,
+        "instance": instance_name,
+        "seed": int(seed),
+        "episodes": episodes,
+        "gamma": rl_cfg.get("gamma"),
+        "learning_rate": rl_cfg.get("learning_rate"),
+        "batch_size": rl_cfg.get("batch_size"),
+        "replay_buffer_size": rl_cfg.get("replay_buffer_size"),
+        "hidden_layers": rl_cfg.get("hidden_layers"),
+        "device": rl_cfg.get("device", "cpu"),
+        "max_steps": max_steps,
+        "smoke_test": bool(smoke_test),
+    }
+    print(f"[train_agent] effective training config: {json.dumps(effective_cfg, sort_keys=True)}")
     rows = []
     t0 = time.time()
     for ep in range(episodes):
@@ -143,7 +165,7 @@ def train_agent(env, method: str = "proposed", episodes: int = 5, max_steps: int
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
     with (out / "raw_logs" / f"training_curve_{method}_{instance_name}_seed_{seed}.json").open("w", encoding="utf-8") as f:
-        json.dump({"seed": seed, "method": method, "instance": instance_name, "runtime_sec": time.time()-t0, "rows": rows}, f, indent=2)
+        json.dump({"seed": seed, "method": method, "instance": instance_name, "runtime_sec": time.time()-t0, "effective_training_config": effective_cfg, "rows": rows}, f, indent=2)
     with (out / "configs" / f"train_{method}_{instance_name}_seed_{seed}.json").open("w", encoding="utf-8") as f:
-        json.dump({"seed": seed, "method": method, "instance": instance_name, "config": cfg}, f, indent=2)
+        json.dump({"seed": seed, "method": method, "instance": instance_name, "config": cfg, "effective_training_config": effective_cfg}, f, indent=2)
     return agent, str(ckpt)

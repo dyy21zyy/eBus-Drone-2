@@ -77,6 +77,42 @@ def test_smoke_training_allows_max_step_truncation_and_labels_non_paper_ready(tm
     assert row['paper_ready_episode'].lower() == 'false'
 
 
+def test_train_agent_cli_episodes_override_config(tmp_path):
+    env = _LongEpisodeEnv(done_after=1)
+    train_agent(
+        env,
+        method='proposed',
+        episodes=3,
+        max_steps=1,
+        smoke_test=True,
+        out_root=str(tmp_path),
+        cfg={'rl': {'episodes': 20, 'max_steps_per_episode': 1}},
+        seed=1,
+        instance_name='small',
+    )
+    with (tmp_path / 'metrics' / 'train_log_proposed_small_seed_1.csv').open(newline='', encoding='utf-8') as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 3
+
+
+def test_train_agent_none_episodes_falls_back_to_config(tmp_path):
+    env = _LongEpisodeEnv(done_after=1)
+    train_agent(
+        env,
+        method='proposed',
+        episodes=None,
+        max_steps=1,
+        smoke_test=True,
+        out_root=str(tmp_path),
+        cfg={'rl': {'episodes': 20, 'max_steps_per_episode': 1}},
+        seed=1,
+        instance_name='small',
+    )
+    with (tmp_path / 'metrics' / 'train_log_proposed_small_seed_1.csv').open(newline='', encoding='utf-8') as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 20
+
+
 def test_missing_checkpoint_error(tmp_path):
     env = EBusDroneEnv(smoke_test=True)
     with pytest.raises(FileNotFoundError, match='Missing checkpoint'):
