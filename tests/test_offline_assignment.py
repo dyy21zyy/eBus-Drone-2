@@ -153,3 +153,21 @@ def test_generation_records_deadline_repair_metadata():
     meta = generated.get("generation_metadata", {})
     assert meta.get("deadline_repair_policy") == "repair_to_min_completion"
     assert "deadline_repaired" in meta
+
+
+def test_assignment_data_uses_only_freight_carrying_trips():
+    instance = _load_instance()
+    freight = [int(x) for x in instance["network"]["freight_carrying_trip_ids"]]
+    data = build_assignment_data(instance)
+    assert data.trips == freight
+
+
+def test_assignment_data_backward_compat_without_freight_trip_ids():
+    import warnings
+    instance = _load_instance()
+    instance["network"].pop("freight_carrying_trip_ids", None)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        data = build_assignment_data(instance)
+    assert data.trips == [int(t["trip_id"]) for t in instance["network"]["scheduled_bus_trips"]]
+    assert any("missing network.freight_carrying_trip_ids" in str(w.message) for w in caught)

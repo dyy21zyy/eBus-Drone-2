@@ -53,6 +53,7 @@ class EBusDroneEnv:
         self.horizon = self.delivery_evaluation_horizon
         self.stop_ids = [int(s["stop_id"]) for s in self.instance["network"]["stops"]]
         self.trip_ids = [int(t["trip_id"]) for t in self.instance["network"]["scheduled_bus_trips"]]
+        self.freight_carrying_trip_ids = set(int(tid) for tid in self.instance["network"].get("freight_carrying_trip_ids", self.trip_ids))
         self.station_ids = [int(s["station_id"]) for s in self.instance["stations"]["stations"]]
         self.action_set = get_action_set(self.config)
         self.station_by_stop = {int(s.get("stop_id", s["station_id"])): int(s["station_id"]) for s in self.instance["stations"]["stations"]}
@@ -232,7 +233,7 @@ class EBusDroneEnv:
         station_id = self.station_by_stop.get(stop_id, -1)
         integrated = station_id != -1
         pax_required = False
-        parcel_ids = get_unloading_parcels(bus["trip_id"], station_id, self.assignment_index, self.parcel_states) if integrated else []
+        parcel_ids = get_unloading_parcels(bus["trip_id"], station_id, self.assignment_index, self.parcel_states) if (integrated and int(bus["trip_id"]) in self.freight_carrying_trip_ids) else []
         parcel_required = len(parcel_ids) > 0
         rate = float(self.scenario.get("passenger", {}).get("arrival_rate_per_stop_per_min", {}).get(str(stop_id), self.scenario.get("passenger", {}).get("arrival_rate_per_stop_per_min", {}).get(stop_id, 0.0)))
         al_p = float(self.scenario.get("passenger", {}).get("alighting_probability", 0.0))

@@ -17,7 +17,7 @@ def _resolve_horizons(config: dict) -> tuple[float, float, float]:
 
 def generate_instance(config: dict, instance_cfg: dict, seed: int) -> dict:
     t_bus, t_del, horizon = _resolve_horizons(config)
-    network = generate_network(config, instance_cfg)
+    network = generate_network(config, instance_cfg, seed=seed)
     stations = generate_stations(config, instance_cfg)
     customers = generate_customers_and_parcels(config, instance_cfg, network["stops"], stations["station_ids"], seed)
     wait_nominal = float(config["parcel"]["nominal_locker_waiting_time_min"])
@@ -56,6 +56,9 @@ def generate_instance(config: dict, instance_cfg: dict, seed: int) -> dict:
         "generation_metadata": {
             "deadline_repair_policy": "repair_to_min_completion",
             "deadline_repaired": deadline_repaired,
+            "num_scheduled_trips": int(network["num_scheduled_trips"]),
+            "num_freight_carrying_trips": int(network["num_freight_carrying_trips"]),
+            "freight_carrying_trip_ids": [int(tid) for tid in network["freight_carrying_trip_ids"]],
         },
     }
 
