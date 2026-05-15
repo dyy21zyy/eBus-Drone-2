@@ -120,3 +120,24 @@ python -m src.main --mode export_tables --config configs/default.yaml --experime
 ```bash
 python -m pytest -q
 ```
+
+
+## Validation note (minimum reproducible pipeline)
+- `configs/default.yaml` is the paper-scale configuration for formal experiments.
+- `configs/debug.yaml` is the fast smoke-test configuration for CI/local validation.
+
+Smoke pipeline (minimal end-to-end):
+```bash
+python -m src.main --mode generate --config configs/debug.yaml --instance small --seed 1 --output-dir outputs_smoke --overwrite
+python -m src.main --mode offline --config configs/debug.yaml --instance small --seed 1 --output-dir outputs_smoke --overwrite
+python -m src.main --mode train --config configs/debug.yaml --instance small --seed 1 --method am_dueling_ddqn_dr --episodes 2 --output-dir outputs_smoke --overwrite
+python -m src.main --mode eval --config configs/debug.yaml --instance small --seed 1 --method am_dueling_ddqn_dr --output-dir outputs_smoke
+python -m src.main --mode benchmark --config configs/debug.yaml --instance small --seeds 1 --methods uniform dwell_greedy battery_threshold am_dueling_ddqn_dr --output-dir outputs_smoke --overwrite
+python -m src.main --mode sensitivity --config configs/debug.yaml --instance small --seeds 1 --output-dir outputs_smoke --overwrite
+```
+
+Paper-scale launch examples:
+```bash
+python -m src.main --mode benchmark --config configs/default.yaml --instance medium --seeds 1 2 3 --methods uniform_30 battery_threshold am_dueling_ddqn_dr
+python -m src.main --mode sensitivity --config configs/default.yaml --instance medium --seeds 1 2 --methods uniform_30 am_dueling_ddqn_dr --sensitivity demand_intensity_factor --values 0.75 1.0 1.25
+```

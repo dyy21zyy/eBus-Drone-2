@@ -24,7 +24,7 @@ from src.utils.metrics import REQUIRED_PAPER_METRICS
 from src.utils.random_seed import set_seed
 
 VALID_METHODS = {
-    "uniform_15", "uniform_30", "uniform_45", "uniform_60", "uniform_120",
+    "uniform", "uniform_15", "uniform_30", "uniform_45", "uniform_60", "uniform_120",
     "dwell_based_greedy", "dwell_greedy", "battery_threshold",
     "dqn_dr", "ddqn_dr", "am_ddqn_dr", "proposed", "am_dueling_ddqn_dr",
     "no_charging", "max_feasible",
@@ -99,8 +99,6 @@ def _validate_args(args):
         raise ValueError("Use either --method or --methods, not both.")
     if args.mode != "sensitivity" and args.sensitivity:
         raise ValueError("--sensitivity is only valid for --mode sensitivity.")
-    if args.mode == "sensitivity" and not args.sensitivity:
-        raise ValueError("Sensitivity mode requires --sensitivity.")
     if args.sensitivity and args.sensitivity not in FACTOR_PATHS:
         raise ValueError(f"Unknown sensitivity variable: {args.sensitivity}")
     methods_to_validate = list(args.methods or []) + ([args.method] if args.method else [])
@@ -404,9 +402,11 @@ def main():
         if args.mode == 'sensitivity':
             vals = args.values or [1.0]
             cfg['_sensitivity_hooks'] = _sensitivity_hooks(cfg)
+            factors = [args.sensitivity] if args.sensitivity else list(FACTOR_PATHS.keys())
             for i in plan['instances']:
-                out = Path(cfg['paths']['outputs']) / 'results' / 'sensitivity' / i / f'{args.sensitivity}.csv'
-                run_sensitivity(plan['methods'], str(out), env_builder=lambda sd, c, _i=i: build_env(c, _i, sd, args.smoke), instance_name=i, test_seeds=plan['seeds'], cfg=cfg, factor=args.sensitivity, values=vals, smoke_test=args.smoke, train_if_missing=args.train_if_missing)
+                for factor in factors:
+                    out = Path(cfg['paths']['outputs']) / 'results' / 'sensitivity' / i / f'{factor}.csv'
+                    run_sensitivity(plan['methods'], str(out), env_builder=lambda sd, c, _i=i: build_env(c, _i, sd, args.smoke), instance_name=i, test_seeds=plan['seeds'], cfg=cfg, factor=factor, values=vals, smoke_test=args.smoke, train_if_missing=args.train_if_missing)
         return
     if args.mode == 'export_tables':
         _export_tables(Path(cfg['paths']['outputs']), args.experiment or 'benchmark', include_smoke=bool(args.include_smoke))
