@@ -99,7 +99,7 @@ class EBusDroneEnv:
             sid = int(s["station_id"])
             n_ch = int(s["chargers"])
             station_load_profile = self.scenario.get("power", {}).get("station_base_load_kw", {}).get(str(sid), self.scenario.get("power", {}).get("station_base_load_kw", {}).get(sid, []))
-            self.station_states[sid] = {"station_id": sid, "charger_release_times_min": [0.0] * n_ch, "bus_charging_intervals": [], "locker_parcels": [], "locker_parcel_ids": [], "locker_inventory_kg": 0.0, "locker_capacity_kg": float(s["locker_capacity_kg"]), "idle_drone_ids": [f"s{sid}_d{j}" for j in range(int(s["drones"]))], "active_drone_missions": [], "pending_parcel_releases": [], "full_batteries": int(s["initial_fully_charged_batteries"]), "depleted_batteries": int(s["initial_depleted_batteries"]), "batteries_charging": [], "charging_batteries": [], "current_bus_charging_load": 0.0, "current_drone_battery_charging_load": 0.0, "power_capacity_kw": float(s["station_power_capacity_kw"]), "charging_slots": n_ch, "G_max": int(self.instance.get("battery", {}).get("max_simultaneous_charging", n_ch)), "P_capacity": float(s["station_power_capacity_kw"]), "P_bat": float(self.instance.get("battery", {}).get("charge_power_kw", 2.0)), "P_chg": float(self.instance["charging"]["pantograph_power_kw"]), "drones": [{"drone_id": f"s{sid}_d{j}", "status": "idle"} for j in range(int(s["drones"]))], "battery_charge_duration_min": float(self.instance.get("battery", {}).get("charge_duration_min", 10.0)), "battery_capacity_kwh": float(self.instance.get("battery", {}).get("capacity_kwh", 0.0)), "dispatch_interval_min": float(self.config.get("drone", {}).get("dispatch_interval_min", 5.0)), "max_round_trip_duration_min": float(self.config.get("drone", {}).get("max_round_trip_duration_min", 1e9)), "base_load_profile_kw": station_load_profile, "base_load_fallback_kw": 50.0}
+            self.station_states[sid] = {"station_id": sid, "charger_release_times_min": [0.0] * n_ch, "bus_charging_intervals": [], "locker_parcels": [], "locker_parcel_ids": [], "locker_inventory_kg": 0.0, "locker_capacity_kg": float(s["locker_capacity_kg"]), "idle_drone_ids": [f"s{sid}_d{j}" for j in range(int(s["drones"]))], "active_drone_missions": [], "pending_parcel_releases": [], "full_batteries": int(s["initial_fully_charged_batteries"]), "depleted_batteries": int(s["initial_depleted_batteries"]), "batteries_charging": [], "charging_batteries": [], "current_bus_charging_load": 0.0, "current_drone_battery_charging_load": 0.0, "power_capacity_kw": float(s["station_power_capacity_kw"]), "charging_slots": n_ch, "G_max": int(self.instance.get("battery", {}).get("max_simultaneous_charging", 6)), "P_capacity": float(s["station_power_capacity_kw"]), "P_bat": float(self.instance.get("battery", {}).get("charge_power_kw", 2.0)), "P_chg": float(self.instance["charging"]["pantograph_power_kw"]), "drones": [{"drone_id": f"s{sid}_d{j}", "status": "idle"} for j in range(int(s["drones"]))], "battery_charge_duration_min": float(self.instance.get("battery", {}).get("charge_duration_min", 45.0)), "battery_capacity_kwh": float(self.instance.get("battery", {}).get("capacity_kwh", 0.0)), "dispatch_interval_min": float(self.config.get("drone", {}).get("dispatch_interval_min", 5.0)), "max_round_trip_duration_min": float(self.config.get("drone", {}).get("max_round_trip_duration_min", 1e9)), "base_load_profile_kw": station_load_profile, "base_load_fallback_kw": 50.0}
 
         self.parcel_states = {}
         customers = {int(c["customer_id"]): c for c in self.instance.get("customers", [])}
@@ -110,7 +110,13 @@ class EBusDroneEnv:
             if option is None:
                 raise ValueError(f"Missing feasible station option for customer {cid} at station {assigned_station}")
             rt_min = float(option["mission_duration_min"])
-            out_min = 0.5 * (rt_min - float(self.instance["drone"]["customer_service_time_min"]) - float(self.instance["drone"]["turnaround_time_min"]))
+            if "outbound_with_service_time_min" in option:
+                out_min = float(option["outbound_with_service_time_min"])
+            else:
+                dist_km = float(option.get("distance_km", 0.0))
+                speed_kmh = float(self.instance["drone"]["speed_kmh"])
+                svc_min = float(self.instance["drone"]["customer_service_time_min"])
+                out_min = (dist_km / speed_kmh) * 60.0 + svc_min
             self.parcel_states[cid] = {
                 "parcel_id": int(cid), "id": int(cid), "customer_id": int(cid),
                 "weight_kg": float(c.get("parcel_weight_kg", 0.0)),

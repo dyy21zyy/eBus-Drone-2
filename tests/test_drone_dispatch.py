@@ -87,6 +87,14 @@ def test_drone_return_adds_depleted_battery_and_realized_completion_recorded():
     assert s["depleted_batteries"] + len(s.get("charging_batteries", [])) >= 1
 
 
+def test_delivery_completion_time_uses_t_out_with_service():
+    s, parcels = _station(idle=1, full=1)
+    parcels[1]["T_out_min"] = 6.0
+    parcels[1]["T_rt_min"] = 9.0
+    operate_station_step(s, 0.0, parcel_states=parcels, p_e=10, p_l=10, new_parcels=True)
+    assert parcels[1]["delivery_completion_time_min"] == 6.0
+
+
 def test_not_dispatch_if_not_released():
     s, parcels = _station(idle=1, full=1)
     parcels[1]["status"] = "onboard"

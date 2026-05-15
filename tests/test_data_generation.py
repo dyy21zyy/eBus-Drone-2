@@ -4,6 +4,7 @@ from src.utils.config import load_yaml
 from src.data_generation.scenario_generator import generate_instance, generate_scenario
 from src.offline.assignment_data_builder import build_assignment_data
 from src.main import run_generate
+from src.data_generation.parcel_generator import generate_customers_and_parcels
 
 
 def test_instance_constraints():
@@ -49,3 +50,30 @@ def test_generated_deadlines_have_planned_feasible_pair():
             if feasible:
                 break
         assert feasible, f"customer {i} has no planned-feasible (trip, station) pair"
+
+
+def test_drone_service_radius_reachability_threshold():
+    config = {
+        "network": {"service_area": {"x_min_km": 0.0, "x_max_km": 0.0, "y_min_km": 7.9, "y_max_km": 7.9}},
+        "parcel": {
+            "weight_values_kg": [1.0],
+            "drone_service_radius_km": 8.0,
+            "nominal_locker_waiting_time_min": 10.0,
+            "nominal_unloading_time_min": 0.0,
+        },
+        "drone": {"speed_kmh": 40.0, "customer_service_time_min": 1.0, "turnaround_time_min": 1.0, "max_round_trip_duration_min": 120.0},
+        "generation": {"bus_operation_horizon_minutes": 360.0, "max_customer_generation_retries": 5},
+    }
+    instance_cfg = {"num_customers": 1}
+    stops = [{"stop_id": 1, "x_km": 0.0}, {"stop_id": 2, "x_km": 0.0}]
+    data = generate_customers_and_parcels(config, instance_cfg, stops, [1, 2], seed=1)
+    d = float(data["customers"][0]["feasible_stations"][0]["distance_km"])
+    assert d <= 8.0
+
+    config["network"]["service_area"]["y_min_km"] = 8.1
+    config["network"]["service_area"]["y_max_km"] = 8.1
+    try:
+        generate_customers_and_parcels(config, instance_cfg, stops, [1], seed=1)
+        assert False, "expected generation failure for unreachable customer"
+    except ValueError:
+        assert True

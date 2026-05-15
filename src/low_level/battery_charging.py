@@ -25,7 +25,7 @@ def start_charging_jobs(station_state: dict, now: float, p_e: float, p_l: float)
         if cap_kwh is not None and p_bat > 0:
             charge_duration = 60.0 * float(cap_kwh) / float(p_bat)
         else:
-            charge_duration = 10.0
+            charge_duration = 45.0
     charge_duration = float(charge_duration)
 
     active_jobs = len(jobs)

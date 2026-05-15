@@ -59,6 +59,9 @@ def generate_instance(config: dict, instance_cfg: dict, seed: int) -> dict:
             "num_scheduled_trips": int(network["num_scheduled_trips"]),
             "num_freight_carrying_trips": int(network["num_freight_carrying_trips"]),
             "freight_carrying_trip_ids": [int(tid) for tid in network["freight_carrying_trip_ids"]],
+            "drone_service_radius_km": float(config["parcel"].get("drone_service_radius_km", config["parcel"].get("drone_round_trip_range_km", 8.0))),
+            "battery_charge_duration_min": float(config["battery"].get("charge_duration_min", 45.0)),
+            "max_simultaneous_battery_charging": int(config["battery"].get("max_simultaneous_charging", 6)),
         },
     }
 
