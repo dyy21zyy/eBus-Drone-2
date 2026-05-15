@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import warnings
 
 from .action_space import action_index_to_duration, feasible_action_mask, feasible_actions, repair_action, get_action_set
 from .bus_process import apply_charge, apply_travel_consumption
@@ -16,6 +17,14 @@ from .state_builder import build_observation, build_feature_names
 
 
 class EBusDroneEnv:
+    def _bus_for_trip(self, trip_id: int) -> dict:
+        return self.physical_bus_states[self.vehicle_circulation[int(trip_id)]]
+    def _apply_non_service_return(self, bus: dict) -> None:
+        op = self.instance.get("network", {})
+        return_time = float(op.get("return_time_min", self.config.get("operation", {}).get("return_time_min", 0.0)))
+        line_time = max(1e-9, float(op.get("nominal_line_time_min", self.config.get("operation", {}).get("nominal_line_time_min", return_time))))
+        return_distance = float(self.state.get("travel_distance_km", 1.0)) * max(0.0, return_time / line_time)
+        bus["battery_kwh"] = apply_travel_consumption(bus["battery_kwh"], return_distance, self.state["travel_energy_kwh_per_km"])
     def __init__(self, config: dict | None = None, instance: dict | None = None, scenario: dict | None = None, assignment: dict | None = None, smoke_test: bool = False):
         self.config = config or {}
         self.instance = instance
@@ -53,6 +62,12 @@ class EBusDroneEnv:
         self.horizon = self.delivery_evaluation_horizon
         self.stop_ids = [int(s["stop_id"]) for s in self.instance["network"]["stops"]]
         self.trip_ids = [int(t["trip_id"]) for t in self.instance["network"]["scheduled_bus_trips"]]
+        if "physical_buses" not in self.instance["network"] or "vehicle_circulation" not in self.instance["network"]:
+            warnings.warn("Instance missing physical_buses or vehicle_circulation; falling back to trip-as-vehicle compatibility mode. Do not use for paper experiments.", RuntimeWarning)
+            self.instance["network"]["physical_buses"] = [f"trip_{tid}" for tid in self.trip_ids]
+            self.instance["network"]["vehicle_circulation"] = {int(tid): f"trip_{tid}" for tid in self.trip_ids}
+        self.physical_buses = list(self.instance["network"]["physical_buses"])
+        self.vehicle_circulation = {int(k): str(v) for k, v in self.instance["network"]["vehicle_circulation"].items()}
         self.freight_carrying_trip_ids = set(int(tid) for tid in self.instance["network"].get("freight_carrying_trip_ids", self.trip_ids))
         self.station_ids = [int(s["station_id"]) for s in self.instance["stations"]["stations"]]
         self.action_set = get_action_set(self.config)
@@ -67,11 +82,16 @@ class EBusDroneEnv:
         self.stop_last_update = {sid: 0.0 for sid in self.stop_ids}
 
         cap = float(self.instance["bus"]["battery_capacity_kwh"])
-        self.bus_states = {}
+        self.physical_bus_states = {}
+        for vid in self.physical_buses:
+            self.physical_bus_states[str(vid)] = {"vehicle_id": str(vid), "trip_id": -1, "current_stop_index": -1, "next_stop_id": self.stop_ids[0], "next_arrival_time_min": 0.0, "battery_kwh": cap, "battery_capacity_kwh": cap, "safety_battery_kwh": float(self.config.get("bus", {}).get("safety_battery_kwh", 5.0)), "onboard_passengers": 0, "passenger_capacity": int(self.config.get("bus", {}).get("passenger_capacity", self.instance.get("bus", {}).get("passenger_capacity", 80))), "onboard_parcel_ids": [], "active": True, "completed": False, "accumulated_delay_min": 0.0, "accumulated_operating_delay_min": 0.0}
+        self.bus_states = {tid: self._bus_for_trip(tid) for tid in self.trip_ids}
         for t in self.instance["network"]["scheduled_bus_trips"]:
             tid = int(t["trip_id"])
-            pids = [int(d["customer_id"]) for d in self.assignment.get("decisions", []) if int(d["trip_id"]) == tid]
-            self.bus_states[tid] = {"trip_id": tid, "current_stop_index": -1, "next_stop_id": self.stop_ids[0], "next_arrival_time_min": float(t["departure_min"]), "battery_kwh": cap, "battery_capacity_kwh": cap, "safety_battery_kwh": float(self.config.get("bus", {}).get("safety_battery_kwh", 5.0)), "onboard_passengers": 0, "passenger_capacity": int(self.config.get("bus", {}).get("passenger_capacity", self.instance.get("bus", {}).get("passenger_capacity", 80))), "onboard_parcel_ids": pids, "active": True, "completed": False, "accumulated_delay_min": 0.0, "accumulated_operating_delay_min": 0.0}
+            bus = self._bus_for_trip(tid)
+            bus["trip_id"] = tid
+            bus["onboard_parcel_ids"] = [int(d["customer_id"]) for d in self.assignment.get("decisions", []) if int(d["trip_id"]) == tid]
+            bus["next_arrival_time_min"] = float(t["departure_min"])
             self.calendar.add_bus_arrival(time=float(t["departure_min"]), trip_id=tid, stop_index=0, station_id=self.station_by_stop.get(self.stop_ids[0], -1), integrated=self.stop_ids[0] in self.station_by_stop, passengers_required=False, parcel_required=False)
 
         self.station_states = {}
@@ -167,7 +187,7 @@ class EBusDroneEnv:
                 for rel in st.get("pending_parcel_releases", []):
                     if float(rel.get("release_time_min", 0.0)) <= t_next + 1e-9:
                         released.extend(unload_parcels_to_locker(
-                            self.bus_states[int(rel["trip_id"])],
+                            self._bus_for_trip(int(rel["trip_id"])),
                             st,
                             self.parcel_states,
                             list(rel.get("parcel_ids", [])),
@@ -222,10 +242,13 @@ class EBusDroneEnv:
                     return
 
     def _process_bus_arrival(self, e):
-        bus = self.bus_states[int(e.trip_id)]
-        if bus["completed"]:
-            return False
+        bus = self._bus_for_trip(int(e.trip_id))
         idx = int(e.stop_index)
+        bus["trip_id"] = int(e.trip_id)
+        if idx == 0:
+            bus["completed"] = False
+            bus["active"] = True
+            bus["onboard_parcel_ids"] = [int(d["customer_id"]) for d in self.assignment.get("decisions", []) if int(d["trip_id"]) == int(e.trip_id)]
         stop_id = self.stop_ids[idx]
         bus["current_stop_index"] = idx
         bus["next_stop_id"] = self.stop_ids[idx + 1] if idx + 1 < len(self.stop_ids) else -1
@@ -270,7 +293,7 @@ class EBusDroneEnv:
             bus["next_arrival_time_min"] = next_t
             bus["battery_kwh"] = apply_travel_consumption(bus["battery_kwh"], self.state["travel_distance_km"], self.state["travel_energy_kwh_per_km"])
         else:
-            bus["completed"] = True
+            self._apply_non_service_return(bus)
             bus["active"] = False
         return False
 
@@ -280,7 +303,7 @@ class EBusDroneEnv:
             if len(z) > 0:
                 z[0] = 1
             return z
-        bus = self.bus_states[int(self.current_decision_event.trip_id)]
+        bus = self._bus_for_trip(int(self.current_decision_event.trip_id))
         st = self.station_states[int(self.current_decision_event.station_id)]
         return feasible_action_mask(self._available_chargers(st, self.state["time"]), bus["battery_kwh"], bus["battery_capacity_kwh"], self.state["charge_power_kw"], self.state["charge_efficiency"], action_set=self.action_set, max_single_stop_seconds=float(self.config.get("charging", {}).get("max_single_stop_seconds", max(self.action_set))))
     def get_feasible_actions(self): return feasible_actions(self.get_action_mask())
@@ -359,7 +382,7 @@ class EBusDroneEnv:
             self.current_event = None
             term, reason = check_termination(self.state, False)
             return self._build_obs_for_current_event(), 0.0, term, False, {"termination_reason": reason}
-        bus = self.bus_states[int(e.trip_id)]
+        bus = self._bus_for_trip(int(e.trip_id))
         st = self.station_states[int(e.station_id)]
         mask = self.get_action_mask()
         if action_index < 0 or action_index >= len(mask):
@@ -392,7 +415,7 @@ class EBusDroneEnv:
             st["charger_release_times_min"][i] = self.state["time"] + dur / 60.0
             st.setdefault("bus_charging_intervals", []).append({
                 "station_id": int(st["station_id"]),
-                "bus_id": int(bus["trip_id"]),
+                "bus_id": bus["vehicle_id"],
                 "charger_index": int(i),
                 "start_time_min": float(self.state["time"]),
                 "end_time_min": float(st["charger_release_times_min"][i]),
@@ -433,7 +456,8 @@ class EBusDroneEnv:
             bus["next_arrival_time_min"] = next_t
             bus["battery_kwh"] = apply_travel_consumption(bus["battery_kwh"], self.state["travel_distance_km"], self.state["travel_energy_kwh_per_km"])
         else:
-            bus["completed"] = True; bus["active"] = False
+            self._apply_non_service_return(bus)
+            bus["active"] = False
 
         self._run_station_interval(float(self.state["time"]), dep)
         p_e = self._active_bus_charging_load_kw(st, dep)
@@ -450,7 +474,7 @@ class EBusDroneEnv:
         event_passenger_delay = float(max(0, affected_passengers) * additional_dwell_min)
         bus["accumulated_delay_min"] = float(bus.get("accumulated_delay_min", 0.0)) + event_passenger_delay
         bus["accumulated_operating_delay_min"] = float(bus.get("accumulated_operating_delay_min", 0.0)) + additional_dwell_min
-        self.event_log.append({"time_min": self.state["time"], "bus_id": bus["trip_id"], "station_id": st["station_id"], "action_sec": dur, "dwell_time_min": realized_dwell_min, "passenger_delay": event_passenger_delay, "parcel_unloading_kg": qf, "battery_before": before, "battery_after_charge": apply_charge(before, dur, self.state["charge_power_kw"], self.state["charge_efficiency"], bus["battery_capacity_kwh"]), "available_chargers_before": av_before, "station_power_overload": float(op["power"].get("overload", 0.0))})
+        self.event_log.append({"time_min": self.state["time"], "bus_id": bus["vehicle_id"], "trip_id": bus["trip_id"], "station_id": st["station_id"], "action_sec": dur, "dwell_time_min": realized_dwell_min, "passenger_delay": event_passenger_delay, "parcel_unloading_kg": qf, "battery_before": before, "battery_after_charge": apply_charge(before, dur, self.state["charge_power_kw"], self.state["charge_efficiency"], bus["battery_capacity_kwh"]), "available_chargers_before": av_before, "station_power_overload": float(op["power"].get("overload", 0.0))})
 
         transition_start_time = float(self.state.get("time", 0.0))
         self.state.update({"time": dep, "trip_id": bus["trip_id"], "trip_location": idx, "battery": bus["battery_kwh"], "battery_max": bus["battery_capacity_kwh"], "onboard_passengers": bus["onboard_passengers"], "onboard_parcels": len(bus["onboard_parcel_ids"]), "locker": int(st["locker_inventory_kg"]), "idle_drones": sum(1 for d in st.get("drones", []) if d.get("status") == "idle"), "full_batteries": st.get("full_batteries", 0), "station_power": op["P_tot"], "power_margin": st["power_capacity_kw"] - op["P_tot"], "available_chargers": self._available_chargers(st, dep), "calendar_len": len(self.calendar)})
@@ -478,7 +502,7 @@ class EBusDroneEnv:
         undelivered_terminal_count = float(len(self._terminal_undelivered_parcels(terminal_eval_time))) if terminated else 0.0
         if terminated and reason == "horizon_reached" and abs(float(self.state.get("time", 0.0)) - float(self.delivery_evaluation_horizon)) > 1e-6:
             raise RuntimeError(f"Horizon termination must end exactly at horizon: t={self.state.get('time')} horizon={self.delivery_evaluation_horizon}")
-        return self._build_obs_for_current_event(), float(reward), terminated, False, {"executed_action_index": ex_idx, "executed_duration": dur, "executed_duration_min": dur / 60.0, "selected_action": int(action_index), "requested_action": int(action_index), "executed_action": int(ex_idx), "action_repaired": ex_idx != action_index, "was_action_repaired": ex_idx != action_index, "invalid_action": invalid_action, "invalid_action_count": int(self.episode_metrics.get("invalid_action_count", 0)), "action_repair_count": int(self.episode_metrics.get("action_repair_count", 0)), "repair_reason": repair_reason, "feasible_action_count": feasible_count, "termination_reason": reason, "reward_components": rc, "event": e, "unloaded_parcels": unload_ids, "unloading_volume_kg": qf, "unloading_duration_min": qf * unloading_time_per_kg_min, "parcel_release_time_min": release_time, "current_trip_id": bus["trip_id"], "current_bus_id": bus["trip_id"], "current_station_id": st["station_id"], "transition_start_time": transition_start_time, "transition_end_time": float(self.state.get("time", dep)), "passenger_delay_delta": rc.get("passenger_delay", 0.0), "parcel_lateness_delta": rc.get("parcel_lateness", 0.0) - rc.get("terminal_penalty", 0.0), "late_delivery_count_delta": rc.get("late_delivery_count_delta", 0.0), "delivered_count_delta": rc.get("delivered_count_delta", 0.0), "undelivered_terminal_count": undelivered_terminal_count, "energy_consumption_delta": rc.get("total_energy_kwh", 0.0), "power_overload_delta": rc.get("power_overload", 0.0), "battery_violation_delta": rc.get("battery_safety", 0.0), "locker_overflow_delta": rc.get("locker_overflow", 0.0), "terminal_undelivered_penalty": rc.get("terminal_penalty", 0.0), "feasible_action_mask": mask.tolist(), "passenger_service": service, "dwell_components": {"passenger_dwell_min": passenger_dwell_min, "freight_dwell_min": freight_dwell_min, "charging_duration_min": charging_duration_min, "realized_dwell_min": realized_dwell_min, "additional_dwell_min": additional_dwell_min, "affected_passengers": affected_passengers, "event_passenger_delay": event_passenger_delay}, "departure_time_min": dep, "bus_operating_delay_delta": additional_dwell_min}
+        return self._build_obs_for_current_event(), float(reward), terminated, False, {"executed_action_index": ex_idx, "executed_duration": dur, "executed_duration_min": dur / 60.0, "selected_action": int(action_index), "requested_action": int(action_index), "executed_action": int(ex_idx), "action_repaired": ex_idx != action_index, "was_action_repaired": ex_idx != action_index, "invalid_action": invalid_action, "invalid_action_count": int(self.episode_metrics.get("invalid_action_count", 0)), "action_repair_count": int(self.episode_metrics.get("action_repair_count", 0)), "repair_reason": repair_reason, "feasible_action_count": feasible_count, "termination_reason": reason, "reward_components": rc, "event": e, "unloaded_parcels": unload_ids, "unloading_volume_kg": qf, "unloading_duration_min": qf * unloading_time_per_kg_min, "parcel_release_time_min": release_time, "current_trip_id": bus["trip_id"], "current_bus_id": bus["vehicle_id"], "current_station_id": st["station_id"], "transition_start_time": transition_start_time, "transition_end_time": float(self.state.get("time", dep)), "passenger_delay_delta": rc.get("passenger_delay", 0.0), "parcel_lateness_delta": rc.get("parcel_lateness", 0.0) - rc.get("terminal_penalty", 0.0), "late_delivery_count_delta": rc.get("late_delivery_count_delta", 0.0), "delivered_count_delta": rc.get("delivered_count_delta", 0.0), "undelivered_terminal_count": undelivered_terminal_count, "energy_consumption_delta": rc.get("total_energy_kwh", 0.0), "power_overload_delta": rc.get("power_overload", 0.0), "battery_violation_delta": rc.get("battery_safety", 0.0), "locker_overflow_delta": rc.get("locker_overflow", 0.0), "terminal_undelivered_penalty": rc.get("terminal_penalty", 0.0), "feasible_action_mask": mask.tolist(), "passenger_service": service, "dwell_components": {"passenger_dwell_min": passenger_dwell_min, "freight_dwell_min": freight_dwell_min, "charging_duration_min": charging_duration_min, "realized_dwell_min": realized_dwell_min, "additional_dwell_min": additional_dwell_min, "affected_passengers": affected_passengers, "event_passenger_delay": event_passenger_delay}, "departure_time_min": dep, "bus_operating_delay_delta": additional_dwell_min}
 
     def _refresh_global_state_features(self):
         now = float(self.state.get("time", 0.0))
@@ -521,7 +545,7 @@ class EBusDroneEnv:
         if e is None:
             local = {"station_id": -1, "trip_id": self.state.get("trip_id", -1), "arriving_battery": self.state.get("battery", 0.0), "onboard_before_alight": self.state.get("onboard_passengers", 0), "onboard_parcels_before_unload": self.state.get("onboard_parcels", 0), "alighting": 0, "initial_board": 0, "q_f": 0.0, "available_chargers": 0, "locker": self.state.get("locker", 0), "idle_drones": self.state.get("idle_drones", 0), "full_batteries": self.state.get("full_batteries", 0), "power_margin": self.state.get("power_margin", 0.0), "urg_min_slack": self.horizon, "urg_avg_slack": self.horizon, "urg_late_count": 0.0, "urg_risk_count": 0.0}
             return build_observation(self.state, local, self.obs_schema)
-        bus = self.bus_states[int(e.trip_id)]; st = self.station_states[int(e.station_id)]
+        bus = self._bus_for_trip(int(e.trip_id)); st = self.station_states[int(e.station_id)]
         unload_ids = get_unloading_parcels(bus["trip_id"], st["station_id"], self.assignment_index, self.parcel_states)
         preview = getattr(e, "passenger_service_preview", {}) or {}
         slacks = [float(p["delivery_deadline_min"]) - float(self.state["time"]) for p in self.parcel_states.values() if int(p.get("assigned_station_id", -1)) == int(st["station_id"]) and p.get("status") in {"onboard", "locker"}]
