@@ -28,12 +28,28 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
             mask = env.get_action_mask()
             event = getattr(env, 'current_event', None)
             getv = (lambda k, d=0.0: event.get(k, d)) if isinstance(event, dict) else (lambda k, d=0.0: getattr(event, k, d) if event is not None else d)
+            preview = getv('passenger_service_preview', {}) or {}
+            t_p_est = float(preview.get('passenger_dwell_min', getv('passenger_dwell_min', 0.0)))
+            unloading_volume_kg = float(getv('unloading_volume_kg', 0.0))
+            unloading_time_sec_per_kg = float(getattr(env, 'instance', {}).get('parcel', {}).get('unloading_time_sec_per_kg', 0.0))
+            t_f = unloading_volume_kg * unloading_time_sec_per_kg / 60.0
+            trip_id = getv('trip_id', None)
+            bus = None
+            if trip_id is not None and hasattr(env, 'bus_states'):
+                bus = env.bus_states.get(int(trip_id))
+            if bus is None and hasattr(env, 'state'):
+                bus = env.state.get('current_bus_state')
+            bus_cfg = getattr(env, 'config', {}).get('bus', {})
+            e_min = float(bus_cfg.get('safety_battery_kwh', 40.0))
+            e_max = float(bus_cfg.get('battery_capacity_kwh', 160.0))
             info_ctx = {
-                'E_current': env.state.get('battery', 0),
-                'E_min': env.state.get('battery_min', 0),
-                'E_max': env.state.get('battery_max', 1),
-                'T_P_est': getv('T_P_est', getv('passenger_dwell_min', 0.0)),
-                'T_F': getv('T_F', getv('freight_dwell_min', 0.0)),
+                'E_current': float(bus.get('battery_kwh', env.state.get('battery', 0.0))) if isinstance(bus, dict) else float(env.state.get('battery', 0.0)),
+                'E_min': e_min,
+                'E_max': float(bus.get('battery_capacity_kwh', e_max)) if isinstance(bus, dict) else e_max,
+                'T_P_est': t_p_est,
+                'T_F': t_f,
+                'action_mask': mask,
+                'event': event,
             }
             action = policy.select_action(obs, mask, info_ctx)
             step_idx += 1
