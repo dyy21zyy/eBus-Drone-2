@@ -52,3 +52,10 @@ def test_charger_availability_by_release_time():
     assert sum(1 for t in rel if t <= now) == 1
     now2 = 4.0
     assert sum(1 for t in rel if t <= now2) == 2
+
+
+def test_default_charge_completion_at_45_min_when_duration_unspecified():
+    st = {"depleted_batteries": 1, "empty_batteries": 1, "full_batteries": 0, "charging_batteries": [], "G_max": 1, "P_capacity": 500.0, "P_bat": 2.0}
+    charge_depleted_batteries(st, now=0.0, p_e=0.0, p_l=0.0)
+    assert charge_depleted_batteries(st, now=44.9, p_e=0.0, p_l=0.0)["completed"] == 0
+    assert charge_depleted_batteries(st, now=45.0, p_e=0.0, p_l=0.0)["completed"] == 1

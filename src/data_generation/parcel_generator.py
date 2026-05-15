@@ -7,7 +7,13 @@ def generate_customers_and_parcels(config: dict, instance_cfg: dict, stops: list
     area = config["network"]["service_area"]
     station_x = {s["stop_id"]: s["x_km"] for s in stops if s["stop_id"] in station_ids}
     values = list(config["parcel"]["weight_values_kg"])
-    max_one_way = float(config["parcel"]["drone_round_trip_range_km"]) / 2.0
+    parcel_cfg = config["parcel"]
+    max_one_way = float(
+        parcel_cfg.get(
+            "drone_service_radius_km",
+            parcel_cfg.get("drone_round_trip_range_km", 8.0),
+        )
+    )
     speed = float(config["drone"]["speed_kmh"])
     svc = float(config["drone"]["customer_service_time_min"])
     turn = float(config["drone"]["turnaround_time_min"])
