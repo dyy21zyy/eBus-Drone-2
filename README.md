@@ -38,6 +38,10 @@ pip install -e .
 python -m src.main --mode generate --config configs/default.yaml --instance small --seed 1
 ```
 
+Paper experiments vs smoke testing:
+- `configs/default.yaml` is the paper-aligned default experiment configuration.
+- `configs/debug.yaml` is a lightweight smoke-test configuration for quick local checks and CI.
+
 ### 2) Solve offline assignment
 ```bash
 python -m src.main --mode offline --config configs/default.yaml --instance small --seed 1
