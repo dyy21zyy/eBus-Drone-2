@@ -5,8 +5,18 @@ from src.data_generation.parcel_generator import generate_customers_and_parcels
 from src.data_generation.passenger_generator import generate_passenger_parameters, generate_passenger_scenario
 from src.data_generation.power_load_generator import generate_station_base_load
 
+def _resolve_horizons(config: dict) -> tuple[float, float, float]:
+    gen = config.get("generation", {})
+    legacy = float(gen.get("horizon_minutes", 480))
+    t_bus = float(gen.get("bus_operation_horizon_minutes", legacy))
+    t_del = float(gen.get("delivery_evaluation_horizon_minutes", legacy))
+    if t_del < t_bus:
+        t_del = t_bus
+    return t_bus, t_del, t_del
+
 
 def generate_instance(config: dict, instance_cfg: dict, seed: int) -> dict:
+    t_bus, t_del, horizon = _resolve_horizons(config)
     network = generate_network(config, instance_cfg)
     stations = generate_stations(config, instance_cfg)
     customers = generate_customers_and_parcels(config, instance_cfg, network["stops"], stations["station_ids"], seed)
@@ -30,7 +40,9 @@ def generate_instance(config: dict, instance_cfg: dict, seed: int) -> dict:
     return {
         "instance_name": instance_cfg["name"],
         "seed": seed,
-        "horizon_minutes": config["generation"]["horizon_minutes"],
+        "bus_operation_horizon_minutes": t_bus,
+        "delivery_evaluation_horizon_minutes": t_del,
+        "horizon_minutes": horizon,
         "network": network,
         "stations": stations,
         "customers": customers["customers"],

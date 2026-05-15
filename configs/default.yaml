@@ -8,7 +8,9 @@ paths:
 offline:
   allow_greedy_fallback: false
 generation:
-  horizon_minutes: 360
+  bus_operation_horizon_minutes: 360
+  delivery_evaluation_horizon_minutes: 480
+  horizon_minutes: 480
   num_scenarios: 1
   allow_infeasible_deadlines: false
   max_customer_generation_retries: 100

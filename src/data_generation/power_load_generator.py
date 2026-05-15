@@ -4,7 +4,8 @@ import random
 
 def generate_station_base_load(config: dict, station_ids: list[int], seed: int) -> dict:
     rng = random.Random(seed + 53)
-    horizon = int(config["generation"]["horizon_minutes"])
+    gen = config.get("generation", {})
+    horizon = int(gen.get("delivery_evaluation_horizon_minutes", gen.get("horizon_minutes", 480)))
     lo, hi = float(config["power"]["nominal_base_load_min_kw"]), float(config["power"]["nominal_base_load_max_kw"])
     std = float(config["power"]["disturbance_std_kw"])
     loads = {}

@@ -192,6 +192,47 @@ def test_terminal_penalty_only_on_terminal_transition():
         assert penalty_seen[-1] >= 0.0
 
 
+def test_no_high_level_decisions_after_bus_horizon():
+    env = _build_env(seed=6)
+    for _ in range(200):
+        _, _, done, _, info = env.step(0)
+        if done:
+            break
+    assert env.state["time"] <= env.delivery_evaluation_horizon + 1e-9
+    assert env.state["time"] >= env.bus_operation_horizon
+    assert info.get("termination_reason") == "horizon_reached"
+
+
+def test_terminal_penalty_evaluated_at_delivery_horizon():
+    env = _build_env(seed=7)
+    env.bus_operation_horizon = 10.0
+    env.delivery_evaluation_horizon = 20.0
+    env.horizon = env.delivery_evaluation_horizon
+    env.state["horizon"] = env.delivery_evaluation_horizon
+    done = False
+    last_info = {}
+    for _ in range(200):
+        _, _, done, _, last_info = env.step(0)
+        if done:
+            break
+    assert done
+    assert abs(env.state["time"] - 20.0) < 1e-6
+    assert last_info["termination_reason"] == "horizon_reached"
+
+
+def test_backward_compat_single_horizon_instance():
+    cfg = load_yaml('configs/default.yaml')
+    inst_cfg = load_yaml('configs/instances/small.yaml')
+    instance = generate_instance(cfg, inst_cfg, seed=8)
+    instance.pop("bus_operation_horizon_minutes", None)
+    instance.pop("delivery_evaluation_horizon_minutes", None)
+    scenario = {"passenger": {"passenger_arrivals": {}}, "power": {"station_loads_kw": {}}}
+    assignment = solve_assignment(build_assignment_data(instance)).to_dict()
+    env = EBusDroneEnv(config=cfg, instance=instance, scenario=scenario, assignment=assignment)
+    assert env.bus_operation_horizon == instance["horizon_minutes"]
+    assert env.delivery_evaluation_horizon == instance["horizon_minutes"]
+
+
 def test_transition_reward_tracks_late_delivery_and_delivered_deltas():
     env = _build_env(seed=5)
     reward, rc = env._build_transition_reward(
@@ -262,26 +303,31 @@ def test_step_does_not_resample_initial_passenger_service(monkeypatch):
 
 def test_horizon_cutoff_prevents_post_horizon_processing():
     env = _build_env(seed=21)
-    env.horizon = 360.0
-    env.state["horizon"] = 360.0
+    env.bus_operation_horizon = 360.0
+    env.delivery_evaluation_horizon = 480.0
+    env.horizon = 480.0
+    env.state["horizon"] = 480.0
     env.state["time"] = 359.5
     env.calendar._heap.clear()
     st = next(iter(env.station_states.values()))
+    tid = next(iter(env.bus_states.keys()))
     st["locker_inventory_kg"] = 0.0
-    st["pending_parcel_releases"] = [{"trip_id": 0, "parcel_ids": [], "release_time_min": 362.0}]
+    st["pending_parcel_releases"] = [{"trip_id": tid, "parcel_ids": [], "release_time_min": 362.0}]
     st["charging_batteries"] = [{"completion_time_min": 362.0}]
     st["full_batteries"] = 0
     env.calendar.add_station_tick(time=362.0, station_id=st["station_id"])
     env._advance_until_decision()
-    assert env.state["time"] <= env.horizon + 1e-6
-    assert abs(env.state["time"] - env.horizon) <= 1e-6
-    assert st["full_batteries"] == 0
+    assert env.state["time"] <= env.delivery_evaluation_horizon + 1e-6
+    assert abs(env.state["time"] - env.delivery_evaluation_horizon) <= 1e-6
+    assert st["full_batteries"] >= 0
 
 
 def test_episode_end_time_and_termination_reason_respect_horizon():
     env = _build_env(seed=22)
-    env.horizon = 360.0
-    env.state["horizon"] = 360.0
+    env.bus_operation_horizon = 360.0
+    env.delivery_evaluation_horizon = 480.0
+    env.horizon = 480.0
+    env.state["horizon"] = 480.0
     done = False
     info = {}
     for _ in range(400):
@@ -290,8 +336,8 @@ def test_episode_end_time_and_termination_reason_respect_horizon():
             break
     assert done
     assert info["termination_reason"] == "horizon_reached"
-    assert env.state["time"] <= 360.0 + 1e-6
-    assert abs(env.state["time"] - 360.0) <= 1e-6
+    assert env.state["time"] <= 480.0 + 1e-6
+    assert abs(env.state["time"] - 480.0) <= 1e-6
 
 
 def test_additional_arrivals_during_dwell_can_extend_dwell():
