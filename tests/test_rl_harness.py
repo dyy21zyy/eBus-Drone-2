@@ -164,6 +164,20 @@ def test_full_horizon_only_true_when_operating_horizon_reached():
     assert metrics['full_horizon_completed'] == (metrics['termination_reason'] == 'horizon_reached')
 
 
+def test_episode_end_time_and_operating_horizon_are_minutes():
+    env = EBusDroneEnv(smoke_test=True)
+    metrics = evaluate_policy(env, DwellGreedyPolicy(), episodes=1, max_steps=None)
+    assert metrics["operating_horizon_min"] == pytest.approx(float(env.horizon))
+    assert metrics["episode_end_time"] <= metrics["operating_horizon_min"] + 1e-6
+
+
+def test_completed_episode_end_time_near_delivery_horizon_minutes():
+    env = EBusDroneEnv(smoke_test=True)
+    metrics = evaluate_policy(env, DwellGreedyPolicy(), episodes=1, max_steps=None)
+    if metrics["termination_reason"] == "horizon_reached":
+        assert metrics["episode_end_time"] == pytest.approx(float(env.horizon), abs=1e-6)
+
+
 def test_sensitivity_changes_factor(tmp_path):
     out = tmp_path / 'sens.csv'
     rows = run_sensitivity(['no_charging'], str(out), env_builder=lambda s, c: EBusDroneEnv(config=c, smoke_test=True), instance_name='small', test_seeds=[1], cfg={'paths': {'outputs': str(tmp_path)}}, factor='passenger_intensity', values=[0.75, 1.25], smoke_test=True)

@@ -365,12 +365,13 @@ class EBusDroneEnv:
         delivered_count_delta = float(after["delivered_count"] - before["delivered_count"])
         energy_delta = float(after["energy_consumption"] - before["energy_consumption"])
         power_delta = float(after["power_overload"] - before["power_overload"])
-        battery_delta = float(after["battery_violation"] - before["battery_violation"])
+        battery_delta = max(0.0, float(after["battery_violation"] - before["battery_violation"]))
         locker_delta = float(after["locker_overflow"] - before["locker_overflow"])
+        eta_e = float(self.config.get("reward", {}).get("eta_E", 1.0))
         components = {
             "passenger_delay": passenger_delta,
             "parcel_lateness": parcel_delta + float(terminal_penalty),
-            "energy_cost": energy_delta,
+            "energy_cost": energy_delta * eta_e,
             "power_overload": power_delta,
             "battery_safety": battery_delta,
             "locker_overflow": locker_delta,

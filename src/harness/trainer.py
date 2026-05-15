@@ -130,8 +130,8 @@ def train_agent(env, method: str = "proposed", episodes: int | None = 5, max_ste
         assert completed_transition_count == replay_insertions_episode, "completed transitions must match replay insertions"
         if termination_reason != "max_steps_truncated" and dec > 0:
             assert terminal_transition_count == 1, "terminal transition must be stored exactly once"
-        operating_horizon = float(getattr(env, "horizon_sec", 0.0)) / 60.0
-        episode_end_time = float(getattr(env, "state", {}).get("time", 0.0)) / 60.0
+        operating_horizon = float(getattr(env, "horizon", getattr(env, "delivery_evaluation_horizon", getattr(env, "state", {}).get("horizon", 0.0))))
+        episode_end_time = float(getattr(env, "state", {}).get("time", 0.0))
         rows.append({
             "episode": ep,
             "episode_reward": ep_reward,

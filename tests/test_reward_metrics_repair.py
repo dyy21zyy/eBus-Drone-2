@@ -1,6 +1,7 @@
 import pytest
 
 from src.env.reward import compute_reward
+from src.env.ebus_drone_env import EBusDroneEnv
 from src.harness.evaluator import evaluate_policy
 
 
@@ -68,3 +69,34 @@ def test_evaluator_contains_required_metrics():
     ]
     for k in required:
         assert k in out
+
+
+def test_energy_cost_scales_with_reward_eta_E():
+    env_base = EBusDroneEnv(smoke_test=True, config={"reward": {"eta_E": 1.0}})
+    env_scaled = EBusDroneEnv(smoke_test=True, config={"reward": {"eta_E": 3.0}})
+    before = {
+        "passenger_delay": 0.0, "parcel_lateness": 0.0, "late_delivery_count": 0.0, "delivered_count": 0.0,
+        "energy_consumption": 0.0, "power_overload": 0.0, "battery_violation": 0.0, "locker_overflow": 0.0,
+        "bus_charging_energy_kwh": 0.0, "drone_charging_energy_kwh": 0.0, "power_overload_duration": 0.0,
+        "locker_overflow_duration": 0.0, "locker_overflow_amount": 0.0,
+    }
+    after = dict(before)
+    after["energy_consumption"] = 2.0
+    _, rc_base = env_base._build_transition_reward(before, after, terminal_penalty=0.0)
+    _, rc_scaled = env_scaled._build_transition_reward(before, after, terminal_penalty=0.0)
+    assert rc_base["energy_cost"] == pytest.approx(2.0)
+    assert rc_scaled["energy_cost"] == pytest.approx(6.0)
+
+
+def test_battery_violation_transition_penalty_is_nonnegative():
+    env = EBusDroneEnv(smoke_test=True)
+    before = {
+        "passenger_delay": 0.0, "parcel_lateness": 0.0, "late_delivery_count": 0.0, "delivered_count": 0.0,
+        "energy_consumption": 0.0, "power_overload": 0.0, "battery_violation": 5.0, "locker_overflow": 0.0,
+        "bus_charging_energy_kwh": 0.0, "drone_charging_energy_kwh": 0.0, "power_overload_duration": 0.0,
+        "locker_overflow_duration": 0.0, "locker_overflow_amount": 0.0,
+    }
+    after = dict(before)
+    after["battery_violation"] = 3.0
+    _, rc = env._build_transition_reward(before, after, terminal_penalty=0.0)
+    assert rc["battery_safety"] == 0.0
