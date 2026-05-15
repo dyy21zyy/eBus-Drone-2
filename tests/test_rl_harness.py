@@ -224,6 +224,24 @@ def test_sensitivity_regen_and_offline_rules_and_scenario_consistency(tmp_path):
     assert rows_inf[0]['offline_status'] == 'infeasible'
     assert rows_inf[0]['full_horizon_completed'] is False
     assert rows_inf[0]['termination_reason'] == 'offline_infeasible'
+    assert 'whether_policy_retrained' in rows_inf[0]
+
+
+def test_sensitivity_freight_trip_availability_forces_regen_and_resolve(tmp_path):
+    calls = {'regen': 0, 'offline': 0}
+
+    def regen_cb(*_args):
+        calls['regen'] += 1
+
+    def offline_cb(*_args):
+        calls['offline'] += 1
+        return 'resolved'
+
+    cfg = {'paths': {'outputs': str(tmp_path)}, '_sensitivity_hooks': {'regenerate_instance': regen_cb, 'resolve_offline': offline_cb}}
+    rows = run_sensitivity(['no_charging'], str(tmp_path / 'freight.csv'), lambda s, c: EBusDroneEnv(config=c, smoke_test=True), 'small', [1], cfg, 'freight_trip_availability', [4], smoke_test=True)
+    assert calls['regen'] == 1 and calls['offline'] == 1
+    assert rows[0]['whether_instance_regenerated'] is True
+    assert rows[0]['whether_offline_resolved'] is True
 
 
 def test_eval_metrics_saved_per_seed(tmp_path):

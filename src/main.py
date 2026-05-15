@@ -55,6 +55,32 @@ def run_offline(cfg, instance_name: str, seed: int):
     write_assignment(result, str(out), metadata=metadata)
 
 
+def _sensitivity_hooks(base_cfg: dict):
+    def _regen(cfg_mod, instance_name: str, seed: int, factor: str, value: float):
+        cfg_file = Path(f"configs/instances/{instance_name}.yaml")
+        instance_cfg = load_yaml(str(cfg_file))
+        if factor in {"num_customers", "parcel_intensity"}:
+            baseline = int(instance_cfg.get("num_customers", 0))
+            target = int(round(float(value))) if factor == "num_customers" else int(round(baseline * float(value)))
+            instance_cfg["num_customers"] = max(1, target)
+        if factor == "freight_trip_availability":
+            instance_cfg["num_freight_carrying_trips"] = max(0, int(round(float(value))))
+        instance = generate_instance(cfg_mod, instance_cfg, seed)
+        if factor == "num_customers" and len(instance.get("customers", [])) != int(instance_cfg["num_customers"]):
+            raise ValueError("Sensitivity num_customers failed: generated customer count mismatch.")
+        write_instance(instance, f"{cfg_mod['paths']['data_generated']}/{instance_name}", f"instance_seed_{seed}")
+        write_instance(generate_scenario(cfg_mod, instance, seed, 0), f"{cfg_mod['paths']['data_generated']}/{instance_name}", f"scenario_0_seed_{seed}")
+
+    def _resolve(cfg_mod, instance_name: str, seed: int, _factor: str, _value: float):
+        try:
+            run_offline(cfg_mod, instance_name, seed)
+            return "resolved"
+        except Exception:
+            return "failed"
+
+    return {"regenerate_instance": _regen, "resolve_offline": _resolve}
+
+
 def build_env(cfg, instance_name: str, seed: int, smoke_test: bool) -> EBusDroneEnv:
     assign_path = Path(cfg["paths"]["outputs"]) / "assignments" / f"offline_assignment_{instance_name}_seed_{seed}.json"
     _require_exists(assign_path, f"Missing offline assignment: {assign_path}. Run --mode offline first.")
@@ -377,6 +403,7 @@ def main():
                 run_ablation(str(out), env_builder=lambda sd, _i=i: build_env(cfg, _i, sd, args.smoke), instance_name=i, test_seeds=plan['seeds'], cfg=cfg, smoke_test=args.smoke, train_if_missing=args.train_if_missing)
         if args.mode == 'sensitivity':
             vals = args.values or [1.0]
+            cfg['_sensitivity_hooks'] = _sensitivity_hooks(cfg)
             for i in plan['instances']:
                 out = Path(cfg['paths']['outputs']) / 'results' / 'sensitivity' / i / f'{args.sensitivity}.csv'
                 run_sensitivity(plan['methods'], str(out), env_builder=lambda sd, c, _i=i: build_env(c, _i, sd, args.smoke), instance_name=i, test_seeds=plan['seeds'], cfg=cfg, factor=args.sensitivity, values=vals, smoke_test=args.smoke, train_if_missing=args.train_if_missing)
