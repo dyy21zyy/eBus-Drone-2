@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import warnings
 
 
 @dataclass(frozen=True)
@@ -50,7 +51,16 @@ def build_assignment_data(instance: dict) -> AssignmentData:
     nominal_unloading_time_min = float(instance["parcel"].get("nominal_unloading_time_min", (instance["parcel"]["unloading_capacity_kg_per_stop"] * unload_sec_per_kg) / 60.0))
 
     customers = [int(c["customer_id"]) for c in customers_raw]
-    trips = [int(b["trip_id"]) for b in trips_raw]
+    scheduled_trips = [int(b["trip_id"]) for b in trips_raw]
+    freight_trip_ids = instance["network"].get("freight_carrying_trip_ids")
+    if freight_trip_ids is None:
+        warnings.warn(
+            "Instance missing network.freight_carrying_trip_ids; falling back to all scheduled trips as freight-carrying (backward compatibility mode).",
+            RuntimeWarning,
+        )
+        trips = list(scheduled_trips)
+    else:
+        trips = [int(tid) for tid in freight_trip_ids]
     stations = [int(s["station_id"]) for s in stations_raw]
     stop_ids = [int(s["stop_id"]) for s in instance["network"]["stops"]]
     stop_index_by_id = {sid: idx for idx, sid in enumerate(stop_ids)}

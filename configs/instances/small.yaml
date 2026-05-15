@@ -2,4 +2,6 @@ name: small
 num_customers: 30
 station_ids: [1, 5, 9, 13, 17, 21]
 num_scheduled_bus_trips: 24
+num_scheduled_trips: 24
+num_freight_carrying_trips: 8
 planned_headway_min: 15

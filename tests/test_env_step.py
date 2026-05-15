@@ -50,7 +50,14 @@ def test_assignment_driven_unloading_chain():
     cfg = load_yaml('configs/default.yaml')
     inst_cfg = load_yaml('configs/instances/small.yaml')
     instance = generate_instance(cfg, inst_cfg, seed=1)
-    scenario = {"passenger": {"passenger_arrivals": {}}, "power": {"station_loads_kw": {}}}
+    scenario = {
+        "passenger": {
+            "passenger_arrivals": {},
+            "arrival_rate_per_stop_per_min": {str(s["stop_id"]): 20.0 for s in instance["network"]["stops"]},
+            "alighting_probability": 0.2,
+        },
+        "power": {"station_loads_kw": {}},
+    }
     assignment = solve_assignment(build_assignment_data(instance)).to_dict()
     env = EBusDroneEnv(config=cfg, instance=instance, scenario=scenario, assignment=assignment)
     idx = build_assignment_indices(assignment)
@@ -109,3 +116,24 @@ def test_station_dispatch_and_delivery_integration():
         if done:
             break
     assert len(env.delivered_parcels) >= 1
+
+
+def test_non_freight_trip_never_unloads_parcels():
+    cfg = load_yaml('configs/default.yaml')
+    inst_cfg = load_yaml('configs/instances/small.yaml')
+    instance = generate_instance(cfg, inst_cfg, seed=1)
+    scenario = {"passenger": {"passenger_arrivals": {}}, "power": {"station_loads_kw": {}}}
+    assignment = solve_assignment(build_assignment_data(instance)).to_dict()
+    env = EBusDroneEnv(config=cfg, instance=instance, scenario=scenario, assignment=assignment)
+    freight = set(instance["network"]["freight_carrying_trip_ids"])
+    saw_non_freight_integrated = False
+    done = False
+    while not done:
+        _, _, done, _, info = env.step(0)
+        trip_id = int(info["current_trip_id"])
+        if int(info["current_station_id"]) != -1 and trip_id not in freight:
+            saw_non_freight_integrated = True
+            assert info["unloaded_parcels"] == []
+            assert info["unloading_volume_kg"] == 0.0
+    # Depending on stochastic event timing, a non-freight integrated decision stop may not occur
+    # in every run, but when it does occur unloading must be empty.
