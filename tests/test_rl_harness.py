@@ -222,3 +222,24 @@ def test_eval_metrics_saved_per_seed(tmp_path):
 def test_empty_rows_raise_error(tmp_path):
     with pytest.raises(ValueError):
         save_eval_metrics([], str(tmp_path/'empty.csv'))
+
+
+def test_checkpoint_config_preserves_hidden_layers_for_eval(tmp_path):
+    env = EBusDroneEnv(smoke_test=True)
+    cfg = {'rl': {'hidden_layers': [16, 8], 'device': 'cpu', 'episodes': 1}}
+    train_agent(env, method='am_dueling_ddqn_dr', episodes=1, max_steps=2, smoke_test=True, out_root=str(tmp_path), cfg=cfg, seed=11, instance_name='small')
+    policy = build_policy('am_dueling_ddqn_dr', env, out_root=str(tmp_path), train_if_missing=False, cfg=cfg, seed=11, instance_name='small')
+    first_linear = policy.agent.online.feature[0]
+    assert first_linear.out_features == 16
+
+
+def test_checkpoint_architecture_mismatch_raises_clear_error(tmp_path):
+    env = EBusDroneEnv(smoke_test=True)
+    cfg = {'rl': {'hidden_layers': [16, 8], 'device': 'cpu', 'episodes': 1}}
+    train_agent(env, method='am_dueling_ddqn_dr', episodes=1, max_steps=2, smoke_test=True, out_root=str(tmp_path), cfg=cfg, seed=13, instance_name='small')
+    ckpt_cfg = tmp_path / 'checkpoints' / 'am_dueling_ddqn_dr_small_seed_13.agent_config.json'
+    payload = __import__('json').loads(ckpt_cfg.read_text(encoding='utf-8'))
+    payload['hidden_layers'] = [32, 32]
+    ckpt_cfg.write_text(__import__('json').dumps(payload), encoding='utf-8')
+    with pytest.raises(RuntimeError, match='architecture mismatch'):
+        build_policy('am_dueling_ddqn_dr', env, out_root=str(tmp_path), train_if_missing=False, cfg=cfg, seed=13, instance_name='small')
