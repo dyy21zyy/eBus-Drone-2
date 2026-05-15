@@ -15,6 +15,9 @@ def test_instance_constraints():
     assert instance['stations']['stations']
     assert instance['customers']
     assert instance['network']['nominal_travel_time_min']
+    assert instance["bus_operation_horizon_minutes"] == 360
+    assert instance["delivery_evaluation_horizon_minutes"] == 480
+    assert instance["horizon_minutes"] == 480
 
 
 def test_generate_command_outputs():

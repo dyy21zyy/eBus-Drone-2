@@ -18,7 +18,8 @@ def generate_passenger_parameters(config: dict, stops: list[dict], seed: int) ->
 
 def generate_passenger_scenario(config: dict, stops: list[dict], seed: int) -> dict:
     rng = random.Random(seed + 41)
-    horizon = int(config["generation"]["horizon_minutes"])
+    gen = config.get("generation", {})
+    horizon = int(gen.get("bus_operation_horizon_minutes", gen.get("horizon_minutes", 480)))
     base = generate_passenger_parameters(config, stops, seed)["baseline_arrival_rate_per_stop_per_min"]
     factor = float(config["passenger"]["demand_intensity_factor"])
     almin, almax = float(config["passenger"]["alighting_probability_min"]), float(config["passenger"]["alighting_probability_max"])
