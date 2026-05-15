@@ -22,6 +22,25 @@ def test_instance_constraints():
     assert instance["network"]["num_scheduled_trips"] == 24
     assert instance["network"]["num_freight_carrying_trips"] == 8
     assert len(instance["network"]["freight_carrying_trip_ids"]) == 8
+    assert instance["bus"]["passenger_capacity"] == 80
+    assert instance["charging"]["pantograph_power_kw"] == 500.0
+    assert instance["power"]["station_capacity_kw"] == 1100.0
+    assert instance["parcel"]["locker_capacity_kg"] == 30.0
+
+
+def test_default_and_instance_configs_match_paper_settings():
+    cfg = load_yaml('configs/default.yaml')
+    medium = load_yaml('configs/instances/medium.yaml')
+    assert cfg["generation"]["bus_operation_horizon_minutes"] == 360
+    assert cfg["generation"]["delivery_evaluation_horizon_minutes"] == 480
+    assert cfg["network"]["num_stops"] == 30
+    assert cfg["charging"]["chargers_per_station"] == 2
+    assert cfg["battery"]["charge_duration_min"] == 45.0
+    assert cfg["rl"]["episodes"] == 5000
+    assert medium["station_ids"] == [1, 5, 9, 13, 17, 21, 25, 29]
+    assert medium["planned_headway_min"] == 10
+    assert medium["num_scheduled_trips"] == 36
+    assert medium["num_freight_carrying_trips"] == 12
 
 
 def test_generate_command_outputs():
@@ -77,3 +96,25 @@ def test_drone_service_radius_reachability_threshold():
         assert False, "expected generation failure for unreachable customer"
     except ValueError:
         assert True
+
+
+def test_generation_validation_guards():
+    cfg = load_yaml('configs/default.yaml')
+    inst_cfg = load_yaml('configs/instances/small.yaml')
+
+    bad_horizon = dict(cfg)
+    bad_horizon["generation"] = dict(cfg["generation"])
+    bad_horizon["generation"]["delivery_evaluation_horizon_minutes"] = 300
+    try:
+        generate_instance(bad_horizon, inst_cfg, seed=1)
+        assert False, "Expected invalid horizon validation failure"
+    except ValueError as e:
+        assert "must be >=" in str(e)
+
+    bad_freq = dict(inst_cfg)
+    bad_freq["num_freight_carrying_trips"] = bad_freq["num_scheduled_trips"] + 1
+    try:
+        generate_instance(cfg, bad_freq, seed=1)
+        assert False, "Expected invalid freight trips validation failure"
+    except ValueError as e:
+        assert "<=" in str(e)

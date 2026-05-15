@@ -11,11 +11,27 @@ def _resolve_horizons(config: dict) -> tuple[float, float, float]:
     t_bus = float(gen.get("bus_operation_horizon_minutes", legacy))
     t_del = float(gen.get("delivery_evaluation_horizon_minutes", legacy))
     if t_del < t_bus:
-        t_del = t_bus
+        raise ValueError(f"delivery_evaluation_horizon_minutes (T_del={t_del}) must be >= bus_operation_horizon_minutes (T_bus={t_bus})")
     return t_bus, t_del, t_del
 
 
+def _validate_generation_inputs(config: dict, instance_cfg: dict):
+    num_scheduled = int(instance_cfg.get("num_scheduled_trips", instance_cfg["num_scheduled_bus_trips"]))
+    num_freight = int(instance_cfg.get("num_freight_carrying_trips", num_scheduled))
+    if num_freight > num_scheduled:
+        raise ValueError(f"num_freight_carrying_trips ({num_freight}) must be <= num_scheduled_trips ({num_scheduled})")
+    if float(config["parcel"].get("drone_service_radius_km", 0.0)) <= 0.0:
+        raise ValueError("drone_service_radius_km must be > 0")
+    if float(config["charging"].get("pantograph_power_kw", 0.0)) <= 0.0:
+        raise ValueError("pantograph_power_kw must be positive")
+    if float(config["power"].get("station_capacity_kw", 0.0)) <= 0.0:
+        raise ValueError("station_capacity_kw must be positive")
+    if float(config["battery"].get("charge_duration_min", 0.0)) <= 0.0:
+        raise ValueError("battery.charge_duration_min must be positive")
+
+
 def generate_instance(config: dict, instance_cfg: dict, seed: int) -> dict:
+    _validate_generation_inputs(config, instance_cfg)
     t_bus, t_del, horizon = _resolve_horizons(config)
     network = generate_network(config, instance_cfg, seed=seed)
     stations = generate_stations(config, instance_cfg)

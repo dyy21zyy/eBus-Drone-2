@@ -1,5 +1,7 @@
+# Debug/smoke-test configuration.
+# NOTE: configs/default.yaml is the paper-aligned configuration and should be used for experiments.
 project: ebus_drone_rl
-instance: medium
+instance: small
 method: proposed
 seed: 1
 paths:
@@ -8,9 +10,9 @@ paths:
 offline:
   allow_greedy_fallback: false
 generation:
-  bus_operation_horizon_minutes: 360
-  delivery_evaluation_horizon_minutes: 480
-  horizon_minutes: 480
+  bus_operation_horizon_minutes: 60
+  delivery_evaluation_horizon_minutes: 90
+  horizon_minutes: 90
   num_scenarios: 1
   allow_infeasible_deadlines: false
   max_customer_generation_retries: 100
@@ -92,19 +94,19 @@ reward:
   eta_l_term: 1.0
   eta_u_term: 1.0
 rl:
-  episodes: 5000
-  evaluation_episodes: 100
-  random_seeds: 5
+  episodes: 2
+  evaluation_episodes: 1
+  random_seeds: 1
   gamma: 0.997
   learning_rate: 5.0e-5
   optimizer: Adam
-  batch_size: 128
-  replay_buffer_size: 500000
-  warmup_steps: 200
+  batch_size: 16
+  replay_buffer_size: 2000
+  warmup_steps: 8
   epsilon_start: 1.0
   epsilon_end: 0.05
   epsilon_decay_fraction: 0.8
-  epsilon_decay_steps: 4000
+  epsilon_decay_steps: 80
   target_update_type: polyak
   target_update_interval: 1
   polyak_tau: 0.005

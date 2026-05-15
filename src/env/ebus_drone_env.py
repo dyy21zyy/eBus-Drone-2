@@ -82,9 +82,14 @@ class EBusDroneEnv:
         self.stop_last_update = {sid: 0.0 for sid in self.stop_ids}
 
         cap = float(self.instance["bus"]["battery_capacity_kwh"])
+        init_batt_min_frac = float(self.config.get("bus", {}).get("initial_battery_fraction_min", 1.0))
+        init_batt_max_frac = float(self.config.get("bus", {}).get("initial_battery_fraction_max", 1.0))
+        init_batt_min_frac = max(0.0, min(1.0, init_batt_min_frac))
+        init_batt_max_frac = max(init_batt_min_frac, min(1.0, init_batt_max_frac))
         self.physical_bus_states = {}
         for vid in self.physical_buses:
-            self.physical_bus_states[str(vid)] = {"vehicle_id": str(vid), "trip_id": -1, "current_stop_index": -1, "next_stop_id": self.stop_ids[0], "next_arrival_time_min": 0.0, "battery_kwh": cap, "battery_capacity_kwh": cap, "safety_battery_kwh": float(self.config.get("bus", {}).get("safety_battery_kwh", 5.0)), "onboard_passengers": 0, "passenger_capacity": int(self.config.get("bus", {}).get("passenger_capacity", self.instance.get("bus", {}).get("passenger_capacity", 80))), "onboard_parcel_ids": [], "active": True, "completed": False, "accumulated_delay_min": 0.0, "accumulated_operating_delay_min": 0.0}
+            init_batt_kwh = float(self.rng.uniform(init_batt_min_frac * cap, init_batt_max_frac * cap))
+            self.physical_bus_states[str(vid)] = {"vehicle_id": str(vid), "trip_id": -1, "current_stop_index": -1, "next_stop_id": self.stop_ids[0], "next_arrival_time_min": 0.0, "battery_kwh": init_batt_kwh, "battery_capacity_kwh": cap, "safety_battery_kwh": float(self.config.get("bus", {}).get("safety_battery_kwh", 5.0)), "onboard_passengers": 0, "passenger_capacity": int(self.config.get("bus", {}).get("passenger_capacity", self.instance.get("bus", {}).get("passenger_capacity", 80))), "onboard_parcel_ids": [], "active": True, "completed": False, "accumulated_delay_min": 0.0, "accumulated_operating_delay_min": 0.0}
         self.bus_states = {tid: self._bus_for_trip(tid) for tid in self.trip_ids}
         for t in self.instance["network"]["scheduled_bus_trips"]:
             tid = int(t["trip_id"])
