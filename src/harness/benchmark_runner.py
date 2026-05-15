@@ -64,6 +64,8 @@ def normalize_method_name(method:str)->str:
         return 'dwell_greedy'
     if method == 'proposed':
         return 'am_dueling_ddqn_dr'
+    if method == 'uniform':
+        return 'uniform_45'
     return method
 
 
