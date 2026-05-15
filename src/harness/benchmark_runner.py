@@ -1,5 +1,6 @@
 from __future__ import annotations
 import csv, json, time
+from copy import deepcopy
 from pathlib import Path
 from src.env.ebus_drone_env import EBusDroneEnv
 from src.harness.evaluator import evaluate_policy
@@ -13,6 +14,50 @@ from src.policies import BatteryThresholdPolicy, DwellGreedyPolicy, LearnedPolic
 from src.utils.metrics import REQUIRED_PAPER_METRICS
 
 AGENT_MAP={"dqn_dr":DQNDRAgent,"ddqn_dr":DDQNDRAgent,"am_ddqn_dr":AMDDQNDRAgent,"proposed":AMDuelingDDQNDRAgent,"am_dueling_ddqn_dr":AMDuelingDDQNDRAgent}
+
+
+def _checkpoint_agent_config_path(ckpt: Path) -> Path:
+    return ckpt.with_suffix('.agent_config.json')
+
+
+def _load_agent_config(ckpt: Path, cfg: dict | None) -> dict:
+    cfg_path = _checkpoint_agent_config_path(ckpt)
+    if cfg_path.exists():
+        payload = json.loads(cfg_path.read_text(encoding='utf-8'))
+        if not isinstance(payload, dict):
+            raise ValueError(f"Invalid saved agent config format: {cfg_path}")
+        return dict(payload)
+    return dict((cfg or {}).get('rl', {}))
+
+
+def _resolve_agent_config(method: str, obs_dim: int, action_dim: int, cfg: dict | None, ckpt: Path) -> dict:
+    base = _load_agent_config(ckpt, cfg)
+    if not base:
+        base = {'device': 'auto'}
+    resolved = deepcopy(base)
+    resolved.setdefault('device', 'auto')
+    resolved['method'] = method
+    resolved['obs_dim'] = int(base.get('obs_dim', obs_dim))
+    resolved['action_dim'] = int(base.get('action_dim', action_dim))
+    if 'dueling' not in resolved:
+        resolved['dueling'] = method in {'proposed', 'am_dueling_ddqn_dr'}
+    if 'use_action_mask' not in resolved:
+        resolved['use_action_mask'] = method in {'am_ddqn_dr', 'proposed', 'am_dueling_ddqn_dr'}
+    return resolved
+
+
+def _validate_architecture_or_raise(agent_cfg: dict, obs_dim: int, action_dim: int, method: str, ckpt: Path):
+    mismatches = []
+    if int(agent_cfg.get('obs_dim', obs_dim)) != int(obs_dim):
+        mismatches.append(f"obs_dim saved={agent_cfg.get('obs_dim')} current={obs_dim}")
+    if int(agent_cfg.get('action_dim', action_dim)) != int(action_dim):
+        mismatches.append(f"action_dim saved={agent_cfg.get('action_dim')} current={action_dim}")
+    expected_dueling = method in {'proposed', 'am_dueling_ddqn_dr'}
+    if bool(agent_cfg.get('dueling', expected_dueling)) != expected_dueling:
+        mismatches.append(f"dueling saved={agent_cfg.get('dueling')} expected_for_method={expected_dueling}")
+    if mismatches:
+        raise ValueError(f"Checkpoint architecture mismatch for {ckpt}: " + "; ".join(mismatches))
+
 
 def normalize_method_name(method:str)->str:
     if method == 'dwell_based_greedy':
@@ -46,8 +91,15 @@ def build_policy(method: str, env: EBusDroneEnv, out_root='outputs', checkpoint:
         _, path = train_agent(env, method=method, episodes=1 if smoke_test else 20, max_steps=10 if smoke_test else 100, smoke_test=smoke_test, out_root=out_root, cfg=cfg, seed=seed, instance_name=instance_name)
         ckpt = Path(path)
     obs,_=env.reset(seed=seed)
-    agent=AGENT_MAP[method](len(obs), len(env.get_action_mask()), {'device':'auto'})
-    agent.load_checkpoint(str(ckpt))
+    obs_dim = len(obs)
+    action_dim = len(env.get_action_mask())
+    agent_cfg = _resolve_agent_config(method, obs_dim, action_dim, cfg, ckpt)
+    _validate_architecture_or_raise(agent_cfg, obs_dim, action_dim, method, ckpt)
+    agent=AGENT_MAP[method](obs_dim, action_dim, agent_cfg)
+    try:
+        agent.load_checkpoint(str(ckpt))
+    except RuntimeError as exc:
+        raise RuntimeError(f"Failed to load checkpoint due to network architecture mismatch for {ckpt}: {exc}") from exc
     return LearnedPolicy(agent)
 
 def run_benchmark(methods, out_csv: str, env_builder, instance_name:str, test_seeds:list[int], cfg:dict, smoke_test: bool = False, train_if_missing:bool=False):

@@ -160,7 +160,22 @@ def train_agent(env, method: str = "proposed", episodes: int | None = 5, max_ste
     (out / "configs").mkdir(parents=True, exist_ok=True)
     ckpt = out / "checkpoints" / f"{method}_{instance_name}_seed_{seed}.pt"
     agent.save_checkpoint(str(ckpt))
+    agent_effective_config = dict(rl_cfg)
+    agent_effective_config.update({
+        "method": method,
+        "obs_dim": int(len(obs)),
+        "action_dim": int(len(env.get_action_mask())),
+        "hidden_layers": rl_cfg.get("hidden_layers", [128, 128]),
+        "learning_rate": rl_cfg.get("learning_rate", rl_cfg.get("lr", 1e-3)),
+        "gamma": rl_cfg.get("gamma", 0.99),
+        "dueling": method in {"proposed", "am_dueling_ddqn_dr"},
+        "use_action_mask": method in {"am_ddqn_dr", "proposed", "am_dueling_ddqn_dr"},
+        "device": rl_cfg.get("device", "auto"),
+    })
+    cfg_path = ckpt.with_suffix('.agent_config.json')
+    cfg_path.write_text(json.dumps(agent_effective_config, indent=2), encoding='utf-8')
     (out / "checkpoints" / f"{method}.pt").write_bytes(ckpt.read_bytes())
+    (out / "checkpoints" / f"{method}.agent_config.json").write_bytes(cfg_path.read_bytes())
     csv_path = out / "metrics" / f"train_log_{method}_{instance_name}_seed_{seed}.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
