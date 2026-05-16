@@ -4,6 +4,7 @@ from pathlib import Path
 import csv
 import json
 import time
+import torch
 
 from src.rl.agents.dqn_dr_agent import DQNDRAgent
 from src.rl.agents.ddqn_dr_agent import DDQNDRAgent
@@ -12,9 +13,11 @@ from src.rl.agents.am_dueling_ddqn_dr_agent import AMDuelingDDQNDRAgent
 from src.rl.sketch_buffer import SketchBuffer
 
 LEARNING_METHODS = {"dqn_dr", "ddqn_dr", "am_ddqn_dr", "proposed", "am_dueling_ddqn_dr"}
+CANONICAL_METHOD_ALIASES = {"proposed": "am_dueling_ddqn_dr"}
 
 
 def _agent_cls(method: str):
+    method = CANONICAL_METHOD_ALIASES.get(method, method)
     return {
         "dqn_dr": DQNDRAgent,
         "ddqn_dr": DDQNDRAgent,
@@ -39,8 +42,10 @@ def train_agent(env, method: str = "proposed", episodes: int | None = 5, max_ste
     cfg_seed = rl_cfg.get("seed")
     if seed is None:
         seed = int(cfg_seed) if cfg_seed is not None else 0
+    method = CANONICAL_METHOD_ALIASES.get(method, method)
     cls = _agent_cls(method)
     agent = cls(len(obs), len(env.get_action_mask()), rl_cfg)
+    print(f"[train_agent] selected device: {agent.device}")
     episodes = int(episodes) if episodes is not None else int(rl_cfg.get("episodes", 5))
     allow_train_truncation = bool(rl_cfg.get("allow_train_truncation", False))
     cfg_max_steps = rl_cfg.get("max_steps_per_episode", 100)
@@ -72,6 +77,8 @@ def train_agent(env, method: str = "proposed", episodes: int | None = 5, max_ste
         ep_reward = 0.0
         ep_cost = 0.0
         losses = []
+        q_values = []
+        action_sum = 0.0
         bat_dep = 0
         dec = 0
         step_idx = 0
@@ -114,6 +121,14 @@ def train_agent(env, method: str = "proposed", episodes: int | None = 5, max_ste
                 if term or trunc:
                     terminal_transition_count += 1
             loss = agent.update(); obs = nxt; ep_reward += reward; dec += 1
+            with torch.no_grad():
+                obs_t = torch.tensor(obs, dtype=torch.float32, device=agent.device).unsqueeze(0)
+                try:
+                    q_t = agent.online(obs_t)
+                except TypeError:
+                    q_t = agent.online(obs_t, torch.tensor(mask, dtype=torch.float32, device=agent.device).unsqueeze(0))
+                q_values.append(float(q_t.max().item()))
+            action_sum += float(action)
             step_idx += 1
             if loss is not None: losses.append(float(loss))
             rc = info.get("reward_components", {})
@@ -138,6 +153,9 @@ def train_agent(env, method: str = "proposed", episodes: int | None = 5, max_ste
             "episode_cost": ep_cost,
             "epsilon": agent._eps(),
             "loss": sum(losses)/len(losses) if losses else "",
+            "mean_q_value": (sum(q_values) / len(q_values)) if q_values else "",
+            "mean_action": (action_sum / dec) if dec else "",
+            "runtime_sec": float(time.time() - t0),
             "number_decision_events": dec,
             "battery_depletion_count": bat_dep,
             "episode_steps": dec,
@@ -160,6 +178,8 @@ def train_agent(env, method: str = "proposed", episodes: int | None = 5, max_ste
     (out / "configs").mkdir(parents=True, exist_ok=True)
     ckpt = out / "checkpoints" / f"{method}_{instance_name}_seed_{seed}.pt"
     agent.save_checkpoint(str(ckpt))
+    best_ckpt = out / "checkpoints" / f"{method}_{instance_name}_seed_{seed}_best.pt"
+    agent.save_checkpoint(str(best_ckpt))
     agent_effective_config = dict(rl_cfg)
     agent_effective_config.update({
         "method": method,

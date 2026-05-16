@@ -81,6 +81,20 @@ def test_missing_checkpoint_fails_unless_train_if_missing(tmp_path):
     assert p is not None
 
 
+def test_proposed_method_alias_uses_canonical_checkpoint_name(tmp_path):
+    from src.env.ebus_drone_env import EBusDroneEnv
+    from src.harness.trainer import train_agent
+
+    env = EBusDroneEnv(smoke_test=True)
+    cfg = {'paths': {'outputs': str(tmp_path)}, 'rl': {'episodes': 1, 'max_steps_per_episode': 2, 'device': 'cpu'}}
+    _, ckpt_alias = train_agent(env, method='proposed', episodes=1, max_steps=2, smoke_test=True, out_root=str(tmp_path), cfg=cfg, seed=7, instance_name='small')
+    _, ckpt_canonical = train_agent(env, method='am_dueling_ddqn_dr', episodes=1, max_steps=2, smoke_test=True, out_root=str(tmp_path), cfg=cfg, seed=7, instance_name='small')
+    expected = tmp_path / 'checkpoints' / 'am_dueling_ddqn_dr_small_seed_7.pt'
+    assert Path(ckpt_alias) == expected
+    assert Path(ckpt_canonical) == expected
+    assert expected.exists()
+
+
 def test_export_tables_refuses_missing_metrics(tmp_path, monkeypatch):
     out = tmp_path / 'o'
     p = out / 'results' / 'benchmark'
