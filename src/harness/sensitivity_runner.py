@@ -24,7 +24,7 @@ FACTOR_PATHS={
     'freight_trip_availability':('generation','freight_trip_availability'),
 }
 
-ONLINE_SCENARIO_ONLY={'passenger_intensity','base_load_perturbation_intensity','chargers_per_station','pantograph_power','station_power_capacity','charging_power'}
+ONLINE_SCENARIO_ONLY={'passenger_intensity','base_load_perturbation_intensity','chargers_per_station','station_power_capacity','charging_power'}
 ONLINE_ENV_ONLY={'station_power_capacity','initial_full_batteries'}
 REQUIRES_OFFLINE_RESOLVE={'num_customers','customer_number','parcel_intensity','locker_capacity','drones_per_station','bus_freight_capacity','station_unloading_capacity','integrated_station_set','freight_trip_availability'}
 ENV_REBUILD_POSSIBLY_REEVAL={'chargers_per_station','max_charging_duration','action_set'}
@@ -50,6 +50,7 @@ def run_sensitivity(methods, out_csv:str, env_builder, instance_name:str, test_s
     retrain_cb=hooks.get('retrain_policy')
     for v in values:
         cfg_mod=deepcopy(cfg); cfg_mod.setdefault(k1,{})[k2]=v
+        print(f"[sensitivity] factor={factor} value={v} flags={flags}", flush=True)
         for seed in test_seeds:
             scenario_token={'seed':seed,'factor':factor,'value':v,'instance':instance_name}
             offline_status='not_required'
@@ -93,4 +94,13 @@ def run_sensitivity(methods, out_csv:str, env_builder, instance_name:str, test_s
             if sub:
                 grouped[f'{m}:{v}']=aggregate(sub)
     Path(out_csv).with_suffix('.json').write_text(json.dumps({'aggregated':grouped}, indent=2), encoding='utf-8')
+    related = {
+        "passenger_intensity": "onboard_passenger_delay",
+        "station_power_capacity": "station_power_overload_amount",
+        "chargers_per_station": "charger_utilization",
+    }.get(factor)
+    if related:
+        vals = [float(r.get(related, 0.0)) for r in rows if r.get("offline_status") not in {"infeasible", "failed"}]
+        if vals and len(set(round(v, 10) for v in vals)) == 1:
+            print(f"[sensitivity][warning] factor={factor} produced identical related metric '{related}' across tested values.", flush=True)
     return rows

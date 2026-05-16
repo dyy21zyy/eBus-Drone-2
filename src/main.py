@@ -144,7 +144,22 @@ def _run_eval(cfg, instance, seed, method, args, rows):
             m[f"{k}_std"] = math.sqrt(sum((x - m[k]) ** 2 for x in vals) / len(vals))
         else:
             m[k] = per_ep[-1][k]
-    m.update({'method': normalize_method_name(method), 'instance': instance, 'seed': seed, 'smoke': bool(args.smoke)})
+    def _mean_std(key: str, prefix: str):
+        vals = [float(r.get(key, 0.0)) for r in per_ep]
+        mean = sum(vals) / len(vals)
+        std = math.sqrt(sum((x - mean) ** 2 for x in vals) / len(vals))
+        m[f"mean_{prefix}"] = mean
+        m[f"std_{prefix}"] = std
+        return mean
+    mtc = _mean_std("total_cost", "total_cost")
+    _mean_std("total_reward", "total_reward")
+    _mean_std("onboard_passenger_delay", "onboard_passenger_delay")
+    _mean_std("parcel_lateness", "parcel_lateness")
+    mmb = _mean_std("minimum_bus_battery", "minimum_bus_battery")
+    _mean_std("total_energy_consumption", "total_energy_consumption")
+    m["success_rate"] = sum(1.0 for r in per_ep if str(r.get("termination_reason", "")) == "horizon_reached") / len(per_ep)
+    m["battery_depletion_rate"] = sum(1.0 for r in per_ep if float(r.get("minimum_bus_battery", 1.0)) <= 0.0) / len(per_ep)
+    m.update({'method': normalize_method_name(method), 'instance': instance, 'seed': seed, 'smoke': bool(args.smoke), 'sum_total_cost': sum(float(r.get("total_cost", 0.0)) for r in per_ep), 'sum_total_reward': sum(float(r.get("total_reward", 0.0)) for r in per_ep)})
     rows.append(m)
 
 
@@ -334,6 +349,7 @@ def main():
     ap.add_argument('--episodes', type=int)
     ap.add_argument('--smoke', action='store_true'); ap.add_argument('--smoke-test', action='store_true')
     ap.add_argument('--checkpoint'); ap.add_argument('--train-if-missing', action='store_true')
+    ap.add_argument('--resume', action='store_true')
     ap.add_argument('--factor'); ap.add_argument('--values', nargs='+', type=float)
     ap.add_argument('--sensitivity')
     ap.add_argument('--max-steps', type=int, default=None)
@@ -378,6 +394,8 @@ def main():
                     cfg=cfg,
                     seed=seed,
                     instance_name=i,
+                    resume=bool(args.resume),
+                    checkpoint=args.checkpoint,
                 )
         return
     if args.mode == 'eval':
