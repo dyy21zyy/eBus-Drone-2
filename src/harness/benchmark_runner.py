@@ -107,12 +107,13 @@ def build_policy(method: str, env: EBusDroneEnv, out_root='outputs', checkpoint:
 def run_benchmark(methods, out_csv: str, env_builder, instance_name:str, test_seeds:list[int], cfg:dict, smoke_test: bool = False, train_if_missing:bool=False):
     methods=[normalize_method_name(m) for m in methods]
     rows=[]
+    eval_episodes = int(cfg.get('rl', {}).get('benchmark_eval_episodes', cfg.get('rl', {}).get('evaluation_episodes', 1)))
     for seed in test_seeds:
         for m in methods:
             env = env_builder(seed)
             t0=time.time()
             pol = build_policy(m, env, out_root=cfg['paths']['outputs'], train_if_missing=train_if_missing, smoke_test=smoke_test, cfg=cfg, seed=seed, instance_name=instance_name)
-            met=evaluate_policy(env, pol, episodes=1, max_steps=10 if smoke_test else None, allow_debug_truncation=bool(smoke_test))
+            met=evaluate_policy(env, pol, episodes=eval_episodes, max_steps=10 if smoke_test else None, allow_debug_truncation=bool(smoke_test))
             met.update({'method':m,'instance':instance_name,'seed':seed,'runtime_sec':time.time()-t0,'smoke':bool(smoke_test),'smoke_mode':bool(smoke_test)})
             rows.append(met)
     if not rows: raise ValueError('Benchmark produced no rows.')

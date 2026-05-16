@@ -131,7 +131,19 @@ def _run_eval(cfg, instance, seed, method, args, rows):
         pol = build_policy(method, env=env, out_root=cfg['paths']['outputs'], checkpoint=args.checkpoint, train_if_missing=args.train_if_missing, smoke_test=args.smoke, cfg=cfg, seed=seed, instance_name=instance)
     except TypeError:
         pol = build_policy(method)
-    m = evaluate_policy(env, pol, episodes=1, max_steps=args.max_steps if args.max_steps is not None else (10 if args.smoke else None), allow_debug_truncation=bool(args.smoke or args.allow_truncated_for_testing))
+    eval_eps = int(args.episodes) if args.episodes is not None else int(cfg.get("rl", {}).get("evaluation_episodes", 1))
+    per_ep = []
+    for _ in range(eval_eps):
+        per_ep.append(evaluate_policy(env, pol, episodes=1, max_steps=args.max_steps if args.max_steps is not None else (10 if args.smoke else None), allow_debug_truncation=bool(args.smoke or args.allow_truncated_for_testing)))
+    m = {}
+    numeric_keys = {k for r in per_ep for k, v in r.items() if isinstance(v, (int, float))}
+    for k in per_ep[0].keys():
+        if k in numeric_keys:
+            vals = [float(r[k]) for r in per_ep]
+            m[k] = sum(vals) / len(vals)
+            m[f"{k}_std"] = math.sqrt(sum((x - m[k]) ** 2 for x in vals) / len(vals))
+        else:
+            m[k] = per_ep[-1][k]
     m.update({'method': normalize_method_name(method), 'instance': instance, 'seed': seed, 'smoke': bool(args.smoke)})
     rows.append(m)
 
