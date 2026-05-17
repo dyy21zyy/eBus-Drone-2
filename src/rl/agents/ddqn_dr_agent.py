@@ -8,6 +8,10 @@ from src.rl.agents.dqn_dr_agent import DQNDRAgent
 
 
 class DDQNDRAgent(DQNDRAgent):
+    def __init__(self, obs_dim: int, action_dim: int, cfg: dict):
+        super().__init__(obs_dim, action_dim, cfg)
+        self.use_double_q = True
+
     def update(self, batch_size=None):
         bs = batch_size or int(self.cfg.get("batch_size", 32))
         if len(self.buffer) < max(bs, int(self.cfg.get("warmup_steps", 20))):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import random
 
 import numpy as np
@@ -33,6 +34,8 @@ class DQNDRAgent:
         # DQN-DR baseline intentionally does not use action masking inside the agent.
         # Environment-side repair/handling is responsible for infeasible actions.
         self.use_action_mask = False
+        self.use_double_q = False
+        self.use_dueling = False
 
     def _eps(self):
         s = float(self.cfg.get("epsilon_start", 1.0))
@@ -115,6 +118,17 @@ class DQNDRAgent:
         return float(loss.item())
 
     def checkpoint_dict(self):
+        hidden_layers = list(self.cfg.get("hidden_layers", [128, 128]))
+        metadata = {
+            "method": self.cfg.get("method", self.__class__.__name__.lower()),
+            "state_dim": int(self.online.model[0].in_features) if hasattr(self.online, "model") else None,
+            "action_dim": int(self.action_dim),
+            "hidden_layers": hidden_layers,
+            "dueling": bool(self.use_dueling),
+            "double": bool(self.use_double_q),
+            "action_mask": bool(self.use_action_mask),
+        }
+        metadata["config_hash"] = hashlib.sha256(repr(metadata).encode("utf-8")).hexdigest()[:16]
         return {
             "online": self.online.state_dict(),
             "target": self.target.state_dict(),
@@ -124,6 +138,7 @@ class DQNDRAgent:
             "action_dim": self.action_dim,
             "action_set": self.cfg.get("action_set_seconds"),
             "normalization": self.cfg.get("normalization", {}),
+            "metadata": metadata,
         }
 
     def save_checkpoint(self, path):
@@ -131,6 +146,19 @@ class DQNDRAgent:
 
     def load_checkpoint(self, path):
         ck = torch.load(path, map_location=self.device)
+        meta = ck.get("metadata", {})
+        if meta:
+            mismatches = []
+            if int(meta.get("action_dim", self.action_dim)) != int(self.action_dim):
+                mismatches.append(f"action_dim saved={meta.get('action_dim')} current={self.action_dim}")
+            if bool(meta.get("dueling", self.use_dueling)) != bool(self.use_dueling):
+                mismatches.append(f"dueling saved={meta.get('dueling')} current={self.use_dueling}")
+            if bool(meta.get("double", self.use_double_q)) != bool(self.use_double_q):
+                mismatches.append(f"double saved={meta.get('double')} current={self.use_double_q}")
+            if bool(meta.get("action_mask", self.use_action_mask)) != bool(self.use_action_mask):
+                mismatches.append(f"action_mask saved={meta.get('action_mask')} current={self.use_action_mask}")
+            if mismatches:
+                raise ValueError("Checkpoint metadata mismatch: " + "; ".join(mismatches))
         self.online.load_state_dict(ck["online"])
         self.target.load_state_dict(ck.get("target", ck["online"]))
         if "optimizer" in ck:

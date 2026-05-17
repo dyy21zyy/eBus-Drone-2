@@ -10,6 +10,7 @@ class AMDuelingDDQNDRAgent(AMDDQNDRAgent):
         self.online = build_network(obs_dim, action_dim, dueling=True, hidden_dims=cfg.get("hidden_layers", [128, 128])).to(self.device)
         self.target = copy.deepcopy(self.online)
         self.optim = torch.optim.Adam(self.online.parameters(), lr=float(cfg.get('learning_rate', cfg.get('lr', 1e-3))))
+        self.use_dueling = True
 
     def select_action(self, observation, action_mask, training=True) -> int:
         if not isinstance(training, bool):

@@ -39,7 +39,8 @@ class AMDDQNDRAgent(DDQNDRAgent):
         with torch.no_grad():
             q_on = self.online(nxt).masked_fill(nmask <= 0, -1e9)
             a_next = q_on.argmax(dim=1)
-            q_next = self.target(nxt).gather(1, a_next.unsqueeze(1)).squeeze(1)
+            q_tgt = self.target(nxt).masked_fill(nmask <= 0, -1e9)
+            q_next = q_tgt.gather(1, a_next.unsqueeze(1)).squeeze(1)
             y = rew + (1 - done) * float(self.cfg.get("gamma", 0.99)) * q_next
         loss = F.mse_loss(q, y)
         self.optim.zero_grad(); loss.backward(); torch.nn.utils.clip_grad_norm_(self.online.parameters(), float(self.cfg.get("gradient_clip_norm", 10.0))); self.optim.step(); self.steps += 1

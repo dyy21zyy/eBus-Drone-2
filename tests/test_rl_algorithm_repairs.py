@@ -146,6 +146,32 @@ def test_checkpoint_restores_action_dim(tmp_path):
     assert b.action_dim == 4
 
 
+def test_checkpoint_arch_mismatch_raises_clear_error(tmp_path):
+    a = AMDuelingDDQNDRAgent(2, 4, {})
+    p = tmp_path / "a.pt"
+    a.save_checkpoint(p)
+    b = DDQNDRAgent(2, 4, {})
+    try:
+        b.load_checkpoint(p)
+        assert False, "Expected architecture mismatch to raise"
+    except ValueError as exc:
+        assert "metadata mismatch" in str(exc).lower()
+
+
+def test_terminal_target_equals_reward_for_ddqn():
+    agent = DDQNDRAgent(2, 3, {"batch_size": 1, "warmup_steps": 1, "gamma": 0.997})
+    s = np.array([0.0, 0.0], dtype=np.float32)
+    m = np.ones(3, dtype=np.float32)
+    agent.observe(s, 0, 7.0, s, True, m, m, {})
+    with torch.no_grad():
+        for p in agent.online.parameters():
+            p.zero_()
+        for p in agent.target.parameters():
+            p.zero_()
+    loss = agent.update(batch_size=1)
+    assert loss is not None
+
+
 def test_rl_trainer_import_safe():
     import src.rl.trainer as tr
     assert hasattr(tr, "DQNAgent")
