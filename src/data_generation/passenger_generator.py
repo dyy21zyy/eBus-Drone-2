@@ -1,5 +1,6 @@
 from __future__ import annotations
 import random
+import math
 
 
 def _truncnorm(rng: random.Random, mean: float, std: float, lo: float, hi: float) -> float:
@@ -23,11 +24,26 @@ def generate_passenger_scenario(config: dict, stops: list[dict], seed: int) -> d
     base = generate_passenger_parameters(config, stops, seed)["baseline_arrival_rate_per_stop_per_min"]
     factor = float(config["passenger"]["demand_intensity_factor"])
     almin, almax = float(config["passenger"]["alighting_probability_min"]), float(config["passenger"]["alighting_probability_max"])
-    rates = {}
-    series = {}
+    rates, arrival_profiles, alighting_profiles, series = {}, {}, {}, {}
     for s in stops:
-        lam = max(base[s["stop_id"]] * factor, 0.0)
-        rates[s["stop_id"]] = lam
-        arrivals = [1 if rng.random() < min(lam, 1.0) else 0 for _ in range(horizon)]
-        series[s["stop_id"]] = arrivals
-    return {"passenger_arrivals": series, "arrival_rate_per_stop_per_min": rates, "alighting_probability": round(rng.uniform(almin, almax), 4)}
+        sid = s["stop_id"]
+        lam_base = max(base[sid] * factor, 0.0)
+        phase = rng.uniform(0.0, 2.0 * math.pi)
+        lam_profile, mu_profile, arrivals = [], [], []
+        for t in range(horizon):
+            seasonal = 1.0 + 0.35 * math.sin((2.0 * math.pi * t / max(horizon, 1)) + phase)
+            lam_t = max(0.0, lam_base * seasonal)
+            lam_profile.append(round(lam_t, 6))
+            arrivals.append(int(rng.random() < min(lam_t, 1.0)))
+            mu_profile.append(round(rng.uniform(almin, almax), 6))
+        rates[sid] = lam_base
+        arrival_profiles[str(sid)] = lam_profile
+        alighting_profiles[str(sid)] = mu_profile
+        series[sid] = arrivals
+    return {
+        "passenger_arrivals": series,
+        "arrival_rate_per_stop_per_min": rates,
+        "arrival_rate_profile_per_stop_per_min": arrival_profiles,
+        "alighting_probability": round(rng.uniform(almin, almax), 4),
+        "alighting_profile_per_stop": alighting_profiles,
+    }

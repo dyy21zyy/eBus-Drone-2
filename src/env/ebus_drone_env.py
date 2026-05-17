@@ -269,8 +269,8 @@ class EBusDroneEnv:
         pax_required = False
         parcel_ids = get_unloading_parcels(bus["trip_id"], station_id, self.assignment_index, self.parcel_states) if (integrated and int(bus["trip_id"]) in self.freight_carrying_trip_ids) else []
         parcel_required = len(parcel_ids) > 0
-        rate = float(self.scenario.get("passenger", {}).get("arrival_rate_per_stop_per_min", {}).get(str(stop_id), self.scenario.get("passenger", {}).get("arrival_rate_per_stop_per_min", {}).get(stop_id, 0.0)))
-        al_p = float(self.scenario.get("passenger", {}).get("alighting_probability", 0.0))
+        rate = self._arrival_rate(stop_id, float(e.time))
+        al_p = self._alighting_prob(stop_id, float(e.time))
         elapsed = max(0.0, float(e.time) - float(self.stop_last_update.get(stop_id, 0.0)))
         arrivals = sample_poisson_arrivals(rate, elapsed, self.rng)
         queue_at_arrival = self.stop_queues[stop_id] + arrivals
@@ -307,6 +307,28 @@ class EBusDroneEnv:
             self._apply_non_service_return(bus)
             bus["active"] = False
         return False
+
+
+    def _lookup_stop_time_value(self, per_stop_time: dict, stop_id: int, time_min: float, default: float = 0.0) -> float:
+        series = per_stop_time.get(str(stop_id), per_stop_time.get(stop_id, None)) if isinstance(per_stop_time, dict) else None
+        if not isinstance(series, list) or not series:
+            return float(default)
+        idx = max(0, min(int(time_min), len(series)-1))
+        return float(series[idx])
+
+    def _arrival_rate(self, stop_id: int, time_min: float) -> float:
+        pax = self.scenario.get("passenger", {})
+        prof = pax.get("arrival_rate_profile_per_stop_per_min", {})
+        if prof:
+            return max(0.0, self._lookup_stop_time_value(prof, stop_id, time_min, 0.0))
+        return max(0.0, float(pax.get("arrival_rate_per_stop_per_min", {}).get(str(stop_id), pax.get("arrival_rate_per_stop_per_min", {}).get(stop_id, 0.0))))
+
+    def _alighting_prob(self, stop_id: int, time_min: float) -> float:
+        pax = self.scenario.get("passenger", {})
+        prof = pax.get("alighting_profile_per_stop", {})
+        if prof:
+            return min(1.0, max(0.0, self._lookup_stop_time_value(prof, stop_id, time_min, 0.0)))
+        return min(1.0, max(0.0, float(pax.get("alighting_probability", 0.0))))
 
     def get_action_mask(self) -> np.ndarray:
         if self.current_decision_event is None:
@@ -441,8 +463,8 @@ class EBusDroneEnv:
         qf = compute_unloading_volume(unload_ids, self.parcel_states)
         unloading_time_per_kg_min = float(self.instance.get("parcel", {}).get("unloading_time_sec_per_kg", 30.0)) / 60.0
         stop_id = self.stop_ids[int(e.stop_index)]
-        rate = float(self.scenario.get("passenger", {}).get("arrival_rate_per_stop_per_min", {}).get(str(stop_id), self.scenario.get("passenger", {}).get("arrival_rate_per_stop_per_min", {}).get(stop_id, 0.0)))
-        al_p = float(self.scenario.get("passenger", {}).get("alighting_probability", 0.0))
+        rate = self._arrival_rate(stop_id, float(e.time))
+        al_p = self._alighting_prob(stop_id, float(e.time))
         bus["onboard_before_service"] = bus["onboard_passengers"]
         bus["battery_before_step"] = bus["battery_kwh"]
         initial_event = getattr(e, "passenger_service_preview", None) or sample_initial_passenger_event(queue=int(getattr(e, "arrival_queue_before_preview", self.stop_queues[stop_id])), onboard=int(getattr(e, "arrival_onboard_before_preview", bus["onboard_passengers"])), capacity=bus["passenger_capacity"], alighting_probability=al_p, rho_al_min_per_pax=1.5/60.0, rho_bo_min_per_pax=3.0/60.0, rng=self.rng)
