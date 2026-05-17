@@ -43,11 +43,14 @@ def operate_station_step(station_state: dict, now: float, *, parcel_states: dict
         waiting = [parcel_states[int(pid)] for pid in station_state.get("locker_parcels", []) if int(pid) in parcel_states]
         feas = feasible_parcels(waiting, now, int(station_state.get("station_id", -1)), max_round_trip_duration)
         idle = idle_drone_ids(station_state)
+        n_disp_cap = min(len(idle), int(station_state.get("full_batteries", 0)), len(feas))
         if feas and idle:
             station_state["dispatch_opportunity_count"] += 1.0
             if int(station_state.get("full_batteries", 0)) <= 0:
                 station_state["dispatch_stockout_count"] += 1.0
         assignments, n_disp = solve_greedy_dispatch(idle, station_state.get("full_batteries", 0), feas, now, eta_l_d, eta_u_d)
+        if n_disp != n_disp_cap:
+            raise RuntimeError(f"Dispatch cardinality mismatch: expected {n_disp_cap}, got {n_disp}")
         if n_disp > 0:
             consume_full_batteries(station_state, n_disp)
             assigned_ids = [int(a["parcel_id"]) for a in assignments]
@@ -68,6 +71,14 @@ def operate_station_step(station_state: dict, now: float, *, parcel_states: dict
                     p["locker_holding_time_min"] = now - float(p["release_time_min"])
                 a["drone_return_time"] = p["drone_return_time_min"]
             mark_active(station_state, assignments)
+
+    station_state["full_batteries"] = max(0, int(station_state.get("full_batteries", 0)))
+    station_state["depleted_batteries"] = max(0, int(station_state.get("depleted_batteries", station_state.get("empty_batteries", 0))))
+    station_state["empty_batteries"] = station_state["depleted_batteries"]
+    station_state["locker_parcels"] = [int(pid) for pid in station_state.get("locker_parcels", [])]
+    station_state["active_drones"] = sum(1 for d in station_state.get("drones", []) if d.get("status") == "active")
+    station_state["idle_drones"] = sum(1 for d in station_state.get("drones", []) if d.get("status") == "idle")
+    station_state["charging_battery_count"] = len(station_state.get("charging_batteries", station_state.get("batteries_charging", [])))
 
     station_state["locker_inventory_kg"] = float(sum(float(parcel_states[int(pid)]["weight_kg"]) for pid in station_state.get("locker_parcels", []) if int(pid) in parcel_states and parcel_states[int(pid)].get("status") == "in_locker"))
 
