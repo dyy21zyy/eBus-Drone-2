@@ -46,9 +46,32 @@ def generate_network(config: dict, instance_cfg: dict, seed: int) -> dict:
     num_scheduled = int(instance_cfg.get("num_scheduled_trips", instance_cfg["num_scheduled_bus_trips"]))
     num_freight = int(instance_cfg.get("num_freight_carrying_trips", num_scheduled))
     for b in range(1, num_scheduled + 1):
-        trips.append({"trip_id": b, "departure_min": (b - 1) * planned_headway_min})
+        departure_min = (b - 1) * planned_headway_min
+        terminal_arrival_min = departure_min + nominal_line_time_min
+        return_completion_min = terminal_arrival_min + return_time_min
+        layover_completion_min = return_completion_min + layover_time_min
+        trips.append({
+            "trip_id": b,
+            "departure_min": departure_min,
+            "terminal_arrival_min": terminal_arrival_min,
+            "return_completion_min": return_completion_min,
+            "layover_completion_min": layover_completion_min,
+        })
     physical_buses = [f"v{idx+1}" for idx in range(max(1, physical_fleet_size))]
-    vehicle_circulation = {int(t["trip_id"]): physical_buses[(int(t["trip_id"]) - 1) % len(physical_buses)] for t in trips}
+    next_available = {vid: 0.0 for vid in physical_buses}
+    vehicle_circulation: dict[int, str] = {}
+    for t in trips:
+        tid = int(t["trip_id"])
+        dep = float(t["departure_min"])
+        feasible = [vid for vid in physical_buses if float(next_available[vid]) <= dep + 1e-9]
+        if not feasible:
+            raise ValueError(
+                f"Infeasible vehicle circulation for trip {tid}: no physical bus available by departure "
+                f"{dep:.3f} min. Increase fleet size or reduce cycle time/headway."
+            )
+        chosen = min(feasible, key=lambda vid: (next_available[vid], vid))
+        vehicle_circulation[tid] = chosen
+        next_available[chosen] = float(t["layover_completion_min"])
     freight_trip_ids = _select_freight_trip_ids(trips, num_freight, seed=seed)
     return {
         "stops": stops,
