@@ -71,6 +71,35 @@ def test_generated_deadlines_have_planned_feasible_pair():
         assert feasible, f"customer {i} has no planned-feasible (trip, station) pair"
 
 
+def test_customer_generation_matches_paper_rules():
+    cfg = load_yaml('configs/default.yaml')
+    inst_cfg = load_yaml('configs/instances/medium.yaml')
+    instance = generate_instance(cfg, inst_cfg, seed=7)
+    allowed_weights = {0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5}
+    for c in instance["customers"]:
+        assert c["parcel_weight_kg"] in allowed_weights
+        assert c["feasible_station_ids"]
+        assert sorted(c["feasible_station_ids"]) == sorted(int(o["station_id"]) for o in c["feasible_stations"])
+        assert c["deadline_class"] in {"tight", "moderate", "loose"}
+        assert c["delivery_deadline_min"] >= c["earliest_planned_completion_min"]
+
+
+def test_deadline_class_mix_approximation_large_sample():
+    cfg = load_yaml('configs/default.yaml')
+    inst_cfg = load_yaml('configs/instances/large.yaml')
+    counts = {"tight": 0, "moderate": 0, "loose": 0}
+    total = 0
+    for seed in range(10, 30):
+        instance = generate_instance(cfg, inst_cfg, seed=seed)
+        for c in instance["customers"]:
+            counts[c["deadline_class"]] += 1
+            total += 1
+    mix = {k: counts[k] / total for k in counts}
+    assert abs(mix["tight"] - 0.30) <= 0.06
+    assert abs(mix["moderate"] - 0.50) <= 0.08
+    assert abs(mix["loose"] - 0.20) <= 0.06
+
+
 def test_drone_service_radius_reachability_threshold():
     config = {
         "network": {"service_area": {"x_min_km": 0.0, "x_max_km": 0.0, "y_min_km": 7.9, "y_max_km": 7.9}},
@@ -85,14 +114,16 @@ def test_drone_service_radius_reachability_threshold():
     }
     instance_cfg = {"num_customers": 1}
     stops = [{"stop_id": 1, "x_km": 0.0}, {"stop_id": 2, "x_km": 0.0}]
-    data = generate_customers_and_parcels(config, instance_cfg, stops, [1, 2], seed=1)
+    trips = [{"trip_id": 1, "departure_min": 0.0}]
+    travel = [[0.0, 0.0], [0.0, 0.0]]
+    data = generate_customers_and_parcels(config, instance_cfg, stops, [1, 2], trips, [1], travel, seed=1)
     d = float(data["customers"][0]["feasible_stations"][0]["distance_km"])
     assert d <= 8.0
 
     config["network"]["service_area"]["y_min_km"] = 8.1
     config["network"]["service_area"]["y_max_km"] = 8.1
     try:
-        generate_customers_and_parcels(config, instance_cfg, stops, [1], seed=1)
+        generate_customers_and_parcels(config, instance_cfg, stops, [1], trips, [1], travel, seed=1)
         assert False, "expected generation failure for unreachable customer"
     except ValueError:
         assert True
