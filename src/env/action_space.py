@@ -4,6 +4,8 @@ from typing import List
 
 import numpy as np
 
+from src.rl.action_mask import ActionMaskInputs, build_feasible_action_mask, feasible_actions as mask_feasible_actions, repair_to_nearest_not_exceeding
+
 DEFAULT_ACTION_SET_SECONDS: List[int] = [0, 15, 30, 45, 60, 75, 90, 105, 120]
 A_FULL: List[int] = DEFAULT_ACTION_SET_SECONDS
 
@@ -31,27 +33,21 @@ def max_charge_duration_sec(current_battery_kwh: float, capacity_kwh: float, pow
 
 def feasible_action_mask(available_chargers: int, current_battery_kwh: float, capacity_kwh: float, power_kw: float, eta: float, action_set: list[int] | None = None, max_single_stop_seconds: float | None = None, atol: float = 1e-9) -> np.ndarray:
     actions = action_set or DEFAULT_ACTION_SET_SECONDS
-    mask = np.zeros(len(actions), dtype=np.int8)
-    mask[0] = 1
-    if available_chargers <= 0:
-        return mask
     u_max = max(actions) if max_single_stop_seconds is None else max(0.0, float(max_single_stop_seconds))
-    max_feasible_duration_sec = max_charge_duration_sec(current_battery_kwh, capacity_kwh, power_kw, eta, u_max)
-    for i, u_sec in enumerate(actions):
-        if u_sec <= max_feasible_duration_sec + atol:
-            mask[i] = 1
-    return mask
+    return build_feasible_action_mask(actions, ActionMaskInputs(
+        available_chargers=available_chargers,
+        current_battery_kwh=current_battery_kwh,
+        capacity_kwh=capacity_kwh,
+        power_kw=power_kw,
+        eta=eta,
+        max_single_stop_seconds=u_max,
+        atol=atol,
+    ))
 
 
 def feasible_actions(mask: np.ndarray) -> list[int]:
-    return [i for i, v in enumerate(mask.tolist()) if v == 1]
+    return mask_feasible_actions(mask)
 
 
 def repair_action(action_index: int, mask: np.ndarray) -> int:
-    feasible = feasible_actions(mask)
-    if not feasible:
-        return 0
-    if action_index in feasible:
-        return action_index
-    lower_or_equal = [i for i in feasible if i <= action_index]
-    return max(lower_or_equal) if lower_or_equal else 0
+    return repair_to_nearest_not_exceeding(action_index, mask)
