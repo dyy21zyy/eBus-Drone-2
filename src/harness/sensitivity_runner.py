@@ -3,6 +3,7 @@ import csv, json, time
 from copy import deepcopy
 from pathlib import Path
 from src.harness.benchmark_runner import build_policy
+from src.harness.methods import normalize_method_name
 from src.harness.evaluator import evaluate_policy
 from src.harness.result_aggregator import aggregate
 
@@ -40,6 +41,7 @@ def _factor_flags(factor:str)->dict[str,bool]:
 def run_sensitivity(methods, out_csv:str, env_builder, instance_name:str, test_seeds:list[int], cfg:dict, factor:str, values:list[float], smoke_test: bool=False, train_if_missing: bool=False):
     if factor not in FACTOR_PATHS:
         raise ValueError(f'Unsupported sensitivity factor: {factor}')
+    methods = [normalize_method_name(m) for m in methods]
     rows=[]
     eval_episodes = int(cfg.get('rl', {}).get('benchmark_eval_episodes', cfg.get('rl', {}).get('evaluation_episodes', 1)))
     k1,k2=FACTOR_PATHS[factor]

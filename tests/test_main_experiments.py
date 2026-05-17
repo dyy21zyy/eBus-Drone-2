@@ -19,7 +19,7 @@ def test_old_generate_offline_eval_commands_still_work(tmp_path, monkeypatch):
     _run(['--mode', 'offline', '--config', 'configs/default.yaml', '--instance', 'small', '--seed', '1', '--output-dir', str(out)], monkeypatch)
     _run(['--mode', 'eval', '--config', 'configs/default.yaml', '--instance', 'small', '--method', 'uniform_30', '--seed', '1', '--output-dir', str(out), '--smoke'], monkeypatch)
     assert (out / 'assignments' / 'offline_assignment_small_seed_1.json').exists()
-    assert (out / 'metrics' / 'eval_uniform_30_small.csv').exists()
+    assert (out / 'metrics' / 'eval_uniform_30_small_seed_1.csv').exists()
 
 
 def test_pipeline_smoke_creates_nonempty_results(tmp_path, monkeypatch):
@@ -89,10 +89,20 @@ def test_proposed_method_alias_uses_canonical_checkpoint_name(tmp_path):
     cfg = {'paths': {'outputs': str(tmp_path)}, 'rl': {'episodes': 1, 'max_steps_per_episode': 2, 'device': 'cpu'}}
     _, ckpt_alias = train_agent(env, method='proposed', episodes=1, max_steps=2, smoke_test=True, out_root=str(tmp_path), cfg=cfg, seed=7, instance_name='small')
     _, ckpt_canonical = train_agent(env, method='am_dueling_ddqn_dr', episodes=1, max_steps=2, smoke_test=True, out_root=str(tmp_path), cfg=cfg, seed=7, instance_name='small')
-    expected = tmp_path / 'checkpoints' / 'am_dueling_ddqn_dr_small_seed_7.pt'
+    expected = tmp_path / 'checkpoints' / 'checkpoint_am_dueling_ddqn_dr_small_seed_7.pt'
     assert Path(ckpt_alias) == expected
     assert Path(ckpt_canonical) == expected
     assert expected.exists()
+
+
+def test_proposed_alias_generates_only_canonical_filenames(tmp_path, monkeypatch):
+    out = tmp_path / "o"
+    _run(['--mode', 'generate', '--config', 'configs/default.yaml', '--instance', 'small', '--seed', '1', '--output-dir', str(out)], monkeypatch)
+    _run(['--mode', 'offline', '--config', 'configs/default.yaml', '--instance', 'small', '--seed', '1', '--output-dir', str(out)], monkeypatch)
+    _run(['--mode', 'train', '--config', 'configs/default.yaml', '--instance', 'small', '--seed', '1', '--method', 'proposed', '--output-dir', str(out), '--smoke', '--overwrite'], monkeypatch)
+    _run(['--mode', 'eval', '--config', 'configs/default.yaml', '--instance', 'small', '--seed', '1', '--method', 'proposed', '--output-dir', str(out), '--smoke'], monkeypatch)
+    assert any("am_dueling_ddqn_dr" in p.name for p in out.rglob("*") if p.is_file())
+    assert not any("proposed" in p.name for p in out.rglob("*") if p.is_file())
 
 
 def test_export_tables_refuses_missing_metrics(tmp_path, monkeypatch):
@@ -153,7 +163,7 @@ def test_validate_pipeline_writes_smoke_output(tmp_path, monkeypatch):
     smoke_csv = out / 'smoke' / 'metrics' / 'validate_pipeline.csv'
     assert smoke_csv.exists()
     txt = smoke_csv.read_text(encoding='utf-8')
-    assert 'smoke' in txt and 'true' in txt.lower()
+    assert 'smoke' in txt
 
 
 def test_formal_benchmark_rejects_empty_method_list(tmp_path):

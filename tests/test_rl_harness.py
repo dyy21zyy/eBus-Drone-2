@@ -34,8 +34,8 @@ class _LongEpisodeEnv:
 def test_training_smoke_writes_checkpoint_and_log(tmp_path):
     env = _LongEpisodeEnv(done_after=5)
     train_agent(env, method='proposed', episodes=1, max_steps=2, smoke_test=True, out_root=str(tmp_path), cfg={'rl': {'episodes': 1, 'max_steps_per_episode': 2}}, seed=1, instance_name='small')
-    assert (tmp_path / 'checkpoints' / 'proposed_small_seed_1.pt').exists()
-    assert (tmp_path / 'metrics' / 'train_log_proposed_small_seed_1.csv').exists()
+    assert (tmp_path / 'checkpoints' / 'checkpoint_am_dueling_ddqn_dr_small_seed_1.pt').exists()
+    assert (tmp_path / 'metrics' / 'train_log_am_dueling_ddqn_dr_small_seed_1.csv').exists()
 
 
 def test_formal_training_ignores_max_steps_and_runs_to_done(tmp_path):
@@ -51,7 +51,7 @@ def test_formal_training_ignores_max_steps_and_runs_to_done(tmp_path):
         seed=1,
         instance_name='small',
     )
-    with (tmp_path / 'metrics' / 'train_log_proposed_small_seed_1.csv').open(newline='', encoding='utf-8') as f:
+    with (tmp_path / 'metrics' / 'train_log_am_dueling_ddqn_dr_small_seed_1.csv').open(newline='', encoding='utf-8') as f:
         row = next(csv.DictReader(f))
     assert int(row['episode_steps']) > 2
     assert row['truncated_by_max_steps'].lower() == 'false'
@@ -70,7 +70,7 @@ def test_smoke_training_allows_max_step_truncation_and_labels_non_paper_ready(tm
         seed=1,
         instance_name='small',
     )
-    with (tmp_path / 'metrics' / 'train_log_proposed_small_seed_1.csv').open(newline='', encoding='utf-8') as f:
+    with (tmp_path / 'metrics' / 'train_log_am_dueling_ddqn_dr_small_seed_1.csv').open(newline='', encoding='utf-8') as f:
         row = next(csv.DictReader(f))
     assert row['truncated_by_max_steps'].lower() == 'true'
     assert row['termination_reason'] == 'max_steps_truncated'
@@ -90,7 +90,7 @@ def test_train_agent_cli_episodes_override_config(tmp_path):
         seed=1,
         instance_name='small',
     )
-    with (tmp_path / 'metrics' / 'train_log_proposed_small_seed_1.csv').open(newline='', encoding='utf-8') as f:
+    with (tmp_path / 'metrics' / 'train_log_am_dueling_ddqn_dr_small_seed_1.csv').open(newline='', encoding='utf-8') as f:
         rows = list(csv.DictReader(f))
     assert len(rows) == 3
 
@@ -108,7 +108,7 @@ def test_train_agent_none_episodes_falls_back_to_config(tmp_path):
         seed=1,
         instance_name='small',
     )
-    with (tmp_path / 'metrics' / 'train_log_proposed_small_seed_1.csv').open(newline='', encoding='utf-8') as f:
+    with (tmp_path / 'metrics' / 'train_log_am_dueling_ddqn_dr_small_seed_1.csv').open(newline='', encoding='utf-8') as f:
         rows = list(csv.DictReader(f))
     assert len(rows) == 20
 
@@ -269,7 +269,7 @@ def test_checkpoint_architecture_mismatch_raises_clear_error(tmp_path):
     env = EBusDroneEnv(smoke_test=True)
     cfg = {'rl': {'hidden_layers': [16, 8], 'device': 'cpu', 'episodes': 1}}
     train_agent(env, method='am_dueling_ddqn_dr', episodes=1, max_steps=2, smoke_test=True, out_root=str(tmp_path), cfg=cfg, seed=13, instance_name='small')
-    ckpt_cfg = tmp_path / 'checkpoints' / 'am_dueling_ddqn_dr_small_seed_13.agent_config.json'
+    ckpt_cfg = tmp_path / 'checkpoints' / 'checkpoint_am_dueling_ddqn_dr_small_seed_13.agent_config.json'
     payload = __import__('json').loads(ckpt_cfg.read_text(encoding='utf-8'))
     payload['hidden_layers'] = [32, 32]
     ckpt_cfg.write_text(__import__('json').dumps(payload), encoding='utf-8')

@@ -18,7 +18,7 @@ def test_smoke_generate_offline_eval_cli(temp_config):
 
     root = Path(temp_config).parent
     assert (root / 'outputs' / 'assignments' / 'offline_assignment_small_seed_1.json').exists()
-    assert (root / 'outputs' / 'metrics' / 'eval_uniform_30_small.csv').exists()
+    assert (root / 'outputs' / 'metrics' / 'eval_uniform_30_small_seed_1.csv').exists()
 
 
 @pytest.mark.unit
