@@ -92,6 +92,8 @@ def operate_station_step(station_state: dict, now: float, *, parcel_states: dict
     station_state["total_energy_kwh"] = station_state["bus_charging_energy_kwh"] + station_state["drone_charging_energy_kwh"]
     station_state["power_overload_amount_kw_min"] = float(station_state.get("power_overload_amount_kw_min", 0.0)) + overload_kw * dt
     station_state["power_overload_duration_min"] = float(station_state.get("power_overload_duration_min", 0.0)) + (dt if overload_kw > 0 else 0.0)
+    station_state["maximum_power_overload_kw"] = max(float(station_state.get("maximum_power_overload_kw", 0.0)), overload_kw)
+    station_state["station_power_violation_penalty"] = float(station_state.get("station_power_violation_penalty", 0.0)) + overload_kw * dt
     overflow_kg = max(0.0, float(station_state.get("locker_inventory_kg", 0.0)) - float(station_state.get("locker_capacity_kg", 0.0)))
     station_state["locker_overflow_amount_kg_min"] = float(station_state.get("locker_overflow_amount_kg_min", 0.0)) + overflow_kg * dt
     station_state["locker_overflow_duration_min"] = float(station_state.get("locker_overflow_duration_min", 0.0)) + (dt if overflow_kg > 0 else 0.0)

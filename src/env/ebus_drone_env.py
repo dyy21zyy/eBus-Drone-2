@@ -157,11 +157,21 @@ class EBusDroneEnv:
         intervals = station_state.get("bus_charging_intervals", [])
         return sum(float(it.get("charging_power_kw", 0.0)) for it in intervals if float(it.get("start_time_min", 0.0)) <= now < float(it.get("end_time_min", 0.0)))
     def _base_load_kw(self, station_state, now):
+        """Piecewise-constant base load sampled on a 1-minute grid (left-closed, right-open)."""
         prof = station_state.get("base_load_profile_kw", [])
         if prof:
-            i = max(0, min(int(round(now)), len(prof) - 1))
+            i = max(0, min(int(float(now)), len(prof) - 1))
             return float(prof[i])
         return float(station_state.get("base_load_fallback_kw", 50.0))
+
+    def _next_base_load_change_time(self, station_state, after_t: float) -> float | None:
+        prof = station_state.get("base_load_profile_kw", [])
+        if not prof:
+            return None
+        next_idx = int(float(after_t)) + 1
+        if 0 <= next_idx < len(prof):
+            return float(next_idx)
+        return None
 
     def _run_station_interval(self, start_t: float, end_t: float):
         if end_t <= start_t:
@@ -181,6 +191,9 @@ class EBusDroneEnv:
                     et = float(interval.get("end_time_min", 0.0))
                     if et > after_t + 1e-9 and (nxt is None or et < nxt):
                         nxt = et
+                bl_next = self._next_base_load_change_time(st, after_t)
+                if bl_next is not None and bl_next > after_t + 1e-9 and (nxt is None or bl_next < nxt):
+                    nxt = bl_next
                 for m in st.get("active_drone_missions", []):
                     rt = float(m.get("eta_return_min", m.get("drone_return_time", 0.0)))
                     if rt > after_t + 1e-9 and (nxt is None or rt < nxt):
@@ -202,6 +215,7 @@ class EBusDroneEnv:
             if next_event is not None:
                 t_next = min(t_next, next_event)
             for st in self.station_states.values():
+                st["last_power_update_time_min"] = min(float(st.get("last_power_update_time_min", t)), float(t))
                 p_e = self._active_bus_charging_load_kw(st, t)
                 p_l = self._base_load_kw(st, t)
                 st["current_bus_charging_load"] = p_e
@@ -373,6 +387,7 @@ class EBusDroneEnv:
         energy_bus = sum(float(st.get("bus_charging_energy_kwh", 0.0)) for st in self.station_states.values())
         energy_drone = sum(float(st.get("drone_charging_energy_kwh", 0.0)) for st in self.station_states.values())
         power_overload = sum(float(st.get("power_overload_amount_kw_min", 0.0)) for st in self.station_states.values())
+        max_power_overload = max((float(st.get("maximum_power_overload_kw", 0.0)) for st in self.station_states.values()), default=0.0)
         locker_overflow = sum(float(st.get("locker_overflow_amount_kg_min", 0.0)) for st in self.station_states.values())
         power_overload_duration = sum(float(st.get("power_overload_duration_min", 0.0)) for st in self.station_states.values())
         locker_overflow_duration = sum(float(st.get("locker_overflow_duration_min", 0.0)) for st in self.station_states.values())
@@ -385,6 +400,7 @@ class EBusDroneEnv:
             "delivered_count": float(len(delivered)),
             "energy_consumption": float(energy_bus + energy_drone),
             "power_overload": float(power_overload),
+            "maximum_station_power_overload": float(max_power_overload),
             "battery_violation": sum(max(0.0, float(b.get("safety_battery_kwh", 0.0)) - float(b.get("battery_kwh", 0.0))) for b in self.bus_states.values()),
             "locker_overflow": float(locker_overflow),
             "bus_charging_energy_kwh": float(energy_bus),
@@ -408,11 +424,12 @@ class EBusDroneEnv:
         battery_delta = max(0.0, float(after["battery_violation"] - before["battery_violation"]))
         locker_delta = float(after["locker_overflow"] - before["locker_overflow"])
         eta_e = float(self.config.get("reward", {}).get("eta_E", 1.0))
+        eta_p = float(self.config.get("reward", {}).get("eta_P", 1.0))
         components = {
             "passenger_delay": passenger_delta,
             "parcel_lateness": parcel_delta + float(terminal_penalty),
             "energy_cost": energy_delta * eta_e,
-            "power_overload": power_delta,
+            "power_overload": power_delta * eta_p,
             "battery_safety": battery_delta,
             "locker_overflow": locker_delta,
             "terminal_penalty": float(terminal_penalty),
