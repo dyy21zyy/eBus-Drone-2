@@ -8,16 +8,16 @@ paths:
 offline:
   allow_greedy_fallback: false
 generation:
-  bus_operation_horizon_minutes: 360
-  delivery_evaluation_horizon_minutes: 480
+  bus_operation_horizon_minutes: 360  # T_bus [min]
+  delivery_evaluation_horizon_minutes: 480  # T_del [min]
   horizon_minutes: 480
   num_scenarios: 1
   allow_infeasible_deadlines: false
   max_customer_generation_retries: 100
 network:
   num_stops: 30
-  stop_spacing_km: 1.0
-  interstop_distance_km: 1.0
+  stop_spacing_km: 1.0  # [km]
+  interstop_distance_km: 1.0  # [km]
   service_area:
     x_min_km: 0.0
     x_max_km: 30.0
@@ -25,19 +25,19 @@ network:
     y_max_km: 6.0
 bus:
   passenger_capacity: 80
-  battery_capacity_kwh: 160.0
-  safety_battery_kwh: 40.0
-  energy_kwh_per_km: 1.6
-  nominal_speed_kmh: 30.0
-  freight_capacity_kg: 20.0
+  battery_capacity_kwh: 160.0  # [kWh]
+  safety_battery_kwh: 40.0  # [kWh]
+  energy_kwh_per_km: 1.6  # [kWh/km]
+  nominal_speed_kmh: 30.0  # [km/h]
+  freight_capacity_kg: 20.0  # [kg] per freight-carrying trip
   initial_battery_fraction_min: 0.55
   initial_battery_fraction_max: 0.85
 charging:
   chargers_per_station: 2
-  pantograph_power_kw: 500.0
+  pantograph_power_kw: 500.0  # [kW]
   efficiency: 0.95
-  action_set_seconds: [0, 15, 30, 45, 60, 75, 90, 105, 120]
-  max_single_stop_seconds: 120
+  action_set_seconds: [0, 15, 30, 45, 60, 75, 90, 105, 120]  # [s]
+  max_single_stop_seconds: 120  # u_max [s]
 passenger:
   arrival_process: time_dependent_poisson
   baseline_rate_mean_per_min: 0.25
@@ -77,9 +77,9 @@ battery:
   max_simultaneous_charging: 6
   charging_mode: non_preemptive
 power:
-  station_capacity_kw: 1100.0
-  nominal_base_load_min_kw: 80.0
-  nominal_base_load_max_kw: 180.0
+  station_capacity_kw: 1100.0  # [kW]
+  nominal_base_load_min_kw: 80.0  # [kW]
+  nominal_base_load_max_kw: 180.0  # [kW]
   disturbance_std_kw: 8.0
 reward:
   alpha_1: 1.0
