@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 
 CANONICAL_METHODS = {
     "uniform",
@@ -20,8 +21,8 @@ def normalize_method_name(method: str) -> str:
     if method is None:
         raise ValueError("Method cannot be None")
     m = str(method).strip().lower()
-    if m == "uniform":
-        return "uniform_45"
+    if m == "uniform" or re.fullmatch(r"uniform_\d+", m):
+        return "uniform"
     return METHOD_ALIASES.get(m, m)
 
 
