@@ -127,9 +127,14 @@ def test_benchmark_generates_summary_csv(tmp_path):
 def test_method_name_normalization():
     assert normalize_method_name('dwell_based_greedy') == 'dwell_greedy'
     assert normalize_method_name('proposed') == 'am_dueling_ddqn_dr'
+    assert normalize_method_name('uniform') == 'uniform'
+    assert normalize_method_name('uniform_45') == 'uniform'
+    assert normalize_method_name('am_ddqn_dr') == 'am_ddqn_dr'
+    assert normalize_method_name('am_dueling_ddqn_dr') == 'am_dueling_ddqn_dr'
 
 
 def test_uniform_method_parsing_supports_paper_durations():
+    assert uniform_seconds_from_method('uniform') == 45
     assert uniform_seconds_from_method('uniform_15') == 15
     assert uniform_seconds_from_method('uniform_30') == 30
     assert uniform_seconds_from_method('uniform_45') == 45

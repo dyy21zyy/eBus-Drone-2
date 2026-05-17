@@ -19,7 +19,7 @@ def test_old_generate_offline_eval_commands_still_work(tmp_path, monkeypatch):
     _run(['--mode', 'offline', '--config', 'configs/default.yaml', '--instance', 'small', '--seed', '1', '--output-dir', str(out)], monkeypatch)
     _run(['--mode', 'eval', '--config', 'configs/default.yaml', '--instance', 'small', '--method', 'uniform_30', '--seed', '1', '--output-dir', str(out), '--smoke'], monkeypatch)
     assert (out / 'assignments' / 'offline_assignment_small_seed_1.json').exists()
-    assert (out / 'metrics' / 'eval_uniform_30_small_seed_1.csv').exists()
+    assert (out / 'metrics' / 'eval_uniform_small_seed_1.csv').exists()
 
 
 def test_pipeline_smoke_creates_nonempty_results(tmp_path, monkeypatch):

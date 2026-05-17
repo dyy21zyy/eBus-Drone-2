@@ -60,19 +60,23 @@ def _validate_architecture_or_raise(agent_cfg: dict, obs_dim: int, action_dim: i
         raise ValueError(f"Checkpoint architecture mismatch for {ckpt}: " + "; ".join(mismatches))
 
 
-def uniform_seconds_from_method(method: str) -> int:
-    method = normalize_method_name(method)
-    if not method.startswith('uniform_'):
-        raise ValueError(f"Method is not a uniform charging policy: {method}")
-    suffix = method.removeprefix('uniform_')
-    if not suffix.isdigit() or int(suffix) <= 0:
-        raise ValueError(f"Invalid uniform method format: {method}. Expected uniform_<positive_integer_seconds>.")
-    return int(suffix)
+def uniform_seconds_from_method(method: str, cfg: dict | None = None) -> int:
+    raw = str(method).strip().lower()
+    if raw == 'uniform':
+        return int((cfg or {}).get('uniform_duration_sec', 45))
+    if raw.startswith('uniform_'):
+        suffix = raw.removeprefix('uniform_')
+        if suffix.isdigit() and int(suffix) > 0:
+            return int(suffix)
+    raise ValueError(f"Method is not a uniform charging policy: {method}")
 
 def build_policy(method: str, env: EBusDroneEnv, out_root='outputs', checkpoint: str|None=None, train_if_missing: bool=False, smoke_test: bool=False, cfg:dict|None=None, seed:int=0, instance_name:str='unknown'):
+    uniform_duration_sec = None
+    if str(method).strip().lower().startswith('uniform'):
+        uniform_duration_sec = uniform_seconds_from_method(method, cfg=cfg)
     method=normalize_method_name(method)
     if method == 'no_charging': return NoChargingPolicy()
-    if method.startswith('uniform_'): return UniformPolicy(uniform_seconds_from_method(method))
+    if method == 'uniform': return UniformPolicy(uniform_duration_sec if uniform_duration_sec is not None else uniform_seconds_from_method(method, cfg=cfg))
     if method == 'max_feasible': return MaxFeasiblePolicy()
     if method == 'dwell_greedy': return DwellGreedyPolicy()
     if method == 'battery_threshold': return BatteryThresholdPolicy()
@@ -106,6 +110,8 @@ def run_benchmark(methods, out_csv: str, env_builder, instance_name:str, test_se
             pol = build_policy(m, env, out_root=cfg['paths']['outputs'], train_if_missing=train_if_missing, smoke_test=smoke_test, cfg=cfg, seed=seed, instance_name=instance_name)
             met=evaluate_policy(env, pol, episodes=eval_episodes, max_steps=10 if smoke_test else None, allow_debug_truncation=bool(smoke_test))
             met.update({'method':m,'instance':instance_name,'seed':seed,'runtime_sec':time.time()-t0,'smoke':bool(smoke_test),'smoke_mode':bool(smoke_test)})
+            if m == 'uniform':
+                met['uniform_duration_sec'] = uniform_seconds_from_method(m, cfg=cfg)
             rows.append(met)
     if not rows: raise ValueError('Benchmark produced no rows.')
     for m in methods:
