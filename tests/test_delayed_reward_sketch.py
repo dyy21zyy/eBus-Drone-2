@@ -65,7 +65,7 @@ def test_training_episode_emits_delayed_reward_metrics_and_terminal_transition(t
         seed=1,
         instance_name="small",
     )
-    with (tmp_path / "metrics" / "train_log_proposed_small_seed_1.csv").open(newline="", encoding="utf-8") as f:
+    with (tmp_path / "metrics" / "train_log_am_dueling_ddqn_dr_small_seed_1.csv").open(newline="", encoding="utf-8") as f:
         row = next(csv.DictReader(f))
     assert int(row["delayed_reward_sketch_count"]) == 1
     assert int(row["completed_transition_count"]) == 1

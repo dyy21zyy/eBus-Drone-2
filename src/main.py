@@ -26,7 +26,7 @@ from src.utils.random_seed import set_seed
 VALID_METHODS = {
     "uniform", "uniform_15", "uniform_30", "uniform_45", "uniform_60", "uniform_120",
     "dwell_based_greedy", "dwell_greedy", "battery_threshold",
-    "dqn_dr", "ddqn_dr", "am_ddqn_dr", "proposed", "am_dueling_ddqn_dr",
+    "dqn_dr", "ddqn_dr", "am_ddqn_dr", "am_dueling_ddqn_dr",
     "no_charging", "max_feasible",
 }
 
@@ -169,6 +169,9 @@ def _export_tables(output_dir: Path, experiment_name: str, include_smoke: bool =
         out_rows = list(csv.DictReader(path.open("r", encoding="utf-8")))
         if not out_rows:
             raise ValueError(f"Empty results: export_tables requires non-empty metrics rows: {path}")
+        for row in out_rows:
+            if "method" in row:
+                row["method"] = normalize_method_name(row["method"])
         return out_rows
 
     def _validate_required(rows, *, experiment: str, instance: str, path: Path):
@@ -403,7 +406,8 @@ def main():
         for i in plan['instances']:
             for seed in plan['seeds']:
                 _run_eval(cfg, i, seed, plan['methods'][0], args, rows)
-        out = Path(cfg['paths']['outputs']) / 'metrics' / f"eval_{plan['methods'][0]}_{plan['instances'][0]}.csv"
+        canonical_method = normalize_method_name(plan['methods'][0])
+        out = Path(cfg['paths']['outputs']) / 'metrics' / f"eval_{canonical_method}_{plan['instances'][0]}_seed_{plan['seeds'][0]}.csv"
         save_eval_metrics(rows, str(out)); print(json.dumps(rows)); return
     if args.mode == 'validate_pipeline':
         _run_smoke_validation(cfg, args)
