@@ -2,7 +2,33 @@ from __future__ import annotations
 import random, math
 
 
-def generate_customers_and_parcels(config: dict, instance_cfg: dict, stops: list[dict], station_ids: list[int], seed: int) -> dict:
+DEADLINE_CLASS_MIX = (
+    ("tight", 0.30, (20.0, 40.0)),
+    ("moderate", 0.50, (40.0, 80.0)),
+    ("loose", 0.20, (80.0, 140.0)),
+)
+
+
+def _draw_deadline_class(rng: random.Random) -> tuple[str, tuple[float, float]]:
+    u = rng.random()
+    cdf = 0.0
+    for name, prob, bounds in DEADLINE_CLASS_MIX:
+        cdf += prob
+        if u <= cdf:
+            return name, bounds
+    return DEADLINE_CLASS_MIX[-1][0], DEADLINE_CLASS_MIX[-1][2]
+
+
+def generate_customers_and_parcels(
+    config: dict,
+    instance_cfg: dict,
+    stops: list[dict],
+    station_ids: list[int],
+    scheduled_bus_trips: list[dict],
+    freight_carrying_trip_ids: list[int],
+    nominal_travel_time_min: list[list[float]],
+    seed: int,
+) -> dict:
     rng = random.Random(seed + 17)
     area = config["network"]["service_area"]
     station_x = {s["stop_id"]: s["x_km"] for s in stops if s["stop_id"] in station_ids}
@@ -18,11 +44,10 @@ def generate_customers_and_parcels(config: dict, instance_cfg: dict, stops: list
     svc = float(config["drone"]["customer_service_time_min"])
     turn = float(config["drone"]["turnaround_time_min"])
     max_dur = float(config["drone"]["max_round_trip_duration_min"])
-    gen = config.get("generation", {})
-    horizon = float(gen.get("bus_operation_horizon_minutes", gen.get("horizon_minutes", 480)))
+    trip_departure_by_id = {int(t["trip_id"]): float(t["departure_min"]) for t in scheduled_bus_trips}
+    freight_trip_ids = [int(tid) for tid in freight_carrying_trip_ids]
     wait_nominal = float(config["parcel"]["nominal_locker_waiting_time_min"])
     nominal_unloading = float(config["parcel"].get("nominal_unloading_time_min", 0.0))
-    allow_infeasible_deadlines = bool(config.get("generation", {}).get("allow_infeasible_deadlines", False))
     max_customer_retries = int(config.get("generation", {}).get("max_customer_generation_retries", 100))
     customers=[]
     for cid in range(1, int(instance_cfg["num_customers"]) + 1):
@@ -39,20 +64,38 @@ def generate_customers_and_parcels(config: dict, instance_cfg: dict, stops: list
                     if rt <= max_dur:
                         feasible.append({"station_id":sid,"distance_km":round(d,4),"mission_duration_min":round(rt,4),"outbound_with_service_time_min":round(outbound_with_service,4)})
             if feasible:
-                fastest_outbound = min(v["outbound_with_service_time_min"] for v in feasible)
-                min_feasible_deadline = nominal_unloading + wait_nominal + fastest_outbound
-                if allow_infeasible_deadlines:
-                    deadline = rng.uniform(0.0, horizon)
-                else:
-                    if min_feasible_deadline > horizon:
-                        continue
-                    deadline = rng.uniform(min_feasible_deadline, horizon)
-                customers.append({"customer_id":cid,"x_km":round(x,4),"y_km":round(y,4),"parcel_weight_kg":rng.choice(values),"feasible_stations":feasible,"delivery_deadline_min":round(deadline,4)})
+                earliest_completion = float("inf")
+                feasible_station_ids: list[int] = []
+                for opt in feasible:
+                    sid = int(opt["station_id"])
+                    if sid not in feasible_station_ids:
+                        feasible_station_ids.append(sid)
+                    stop_idx = sid - 1
+                    for tid in freight_trip_ids:
+                        dep = trip_departure_by_id[tid]
+                        arrival = dep + float(nominal_travel_time_min[0][stop_idx])
+                        completion = arrival + nominal_unloading + wait_nominal + float(opt["outbound_with_service_time_min"])
+                        earliest_completion = min(earliest_completion, completion)
+
+                deadline_class, slack_bounds = _draw_deadline_class(rng)
+                slack_min = rng.uniform(slack_bounds[0], slack_bounds[1])
+                deadline = earliest_completion + slack_min
+                customers.append({
+                    "customer_id": cid,
+                    "x_km": round(x, 4),
+                    "y_km": round(y, 4),
+                    "parcel_weight_kg": rng.choice(values),
+                    "feasible_stations": feasible,
+                    "feasible_station_ids": sorted(feasible_station_ids),
+                    "earliest_planned_completion_min": round(earliest_completion, 4),
+                    "deadline_class": deadline_class,
+                    "delivery_deadline_min": round(deadline, 4),
+                })
                 generated = True
                 break
         if not generated:
             raise ValueError(
                 f"Unable to generate feasible customer {cid} in {max_customer_retries} attempts; "
-                f"allow_infeasible_deadlines={allow_infeasible_deadlines}."
+                f"freight_carrying_trip_ids={freight_trip_ids}."
             )
     return {"customers":customers}

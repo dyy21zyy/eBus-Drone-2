@@ -151,7 +151,7 @@ def test_generation_records_deadline_repair_metadata():
     inst_cfg = load_yaml("configs/instances/small.yaml")
     generated = generate_instance(cfg, inst_cfg, 1)
     meta = generated.get("generation_metadata", {})
-    assert meta.get("deadline_repair_policy") == "repair_to_min_completion"
+    assert meta.get("deadline_repair_policy") == "paper_slack_from_earliest_planned_completion"
     assert "deadline_repaired" in meta
 
 
