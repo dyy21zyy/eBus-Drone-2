@@ -53,6 +53,16 @@ def test_dispatch_count_limited_by_full_batteries_and_unique_assignments():
     assert len(selected_drones) == len(set(selected_drones))
 
 
+def test_dispatch_count_equals_n_disp_capacity_when_feasible_exist():
+    parcels = {
+        i: {"id": i, "parcel_id": i, "status": "in_locker", "assigned_station_id": 1, "deadline_min": 50 + i, "release_time_min": 0.0, "T_out_min": 3, "T_rt_min": 6, "drone_cost": 1, "weight_kg": 1.0}
+        for i in range(1, 7)
+    }
+    s, parcels = _station(idle=3, full=4, locker_parcels=[1, 2, 3, 4, 5, 6], parcels=parcels)
+    r = operate_station_step(s, 0, parcel_states=parcels, p_e=10, p_l=10, new_parcels=True)
+    assert r["n_disp"] == min(3, 4, 6)
+
+
 def test_urgent_or_late_priority_when_base_cost_similar():
     parcels = {
         1: {"id": 1, "parcel_id": 1, "status": "in_locker", "assigned_station_id": 1, "delivery_deadline_min": 4, "release_time_min": 0.0, "T_out_min": 5, "T_rt_min": 8, "drone_cost": 1.0, "weight_kg": 1.0},
@@ -85,6 +95,16 @@ def test_drone_return_adds_depleted_battery_and_realized_completion_recorded():
     assert parcels[1]["delivery_completion_time_min"] == 3
     operate_station_step(s, 5, parcel_states=parcels, p_e=10, p_l=10, new_parcels=False)
     assert s["depleted_batteries"] + len(s.get("charging_batteries", [])) >= 1
+
+
+def test_nonnegative_inventory_and_counts_after_operation():
+    s, parcels = _station(idle=1, full=1)
+    operate_station_step(s, 0, parcel_states=parcels, p_e=10, p_l=10, new_parcels=True)
+    assert s["full_batteries"] >= 0
+    assert s["depleted_batteries"] >= 0
+    assert s["active_drones"] >= 0
+    assert s["idle_drones"] >= 0
+    assert s["charging_battery_count"] >= 0
 
 
 def test_delivery_completion_time_uses_t_out_with_service():
