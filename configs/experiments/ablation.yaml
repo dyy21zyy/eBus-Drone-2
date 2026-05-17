@@ -3,4 +3,4 @@ methods:
   - dqn_dr
   - ddqn_dr
   - am_ddqn_dr
-  - proposed
+  - am_dueling_ddqn_dr
