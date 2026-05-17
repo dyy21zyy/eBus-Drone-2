@@ -19,7 +19,7 @@ from src.offline.assignment_data_builder import build_assignment_data
 from src.offline.assignment_io import load_offline_assignment, write_assignment
 from src.offline.assignment_solver import solve_assignment
 from src.offline.assignment_validator import summarize_assignment_flows
-from src.utils.config import load_instance, load_scenario, load_yaml
+from src.utils.config import load_instance, load_scenario, load_yaml, validate_config
 from src.utils.metrics import REQUIRED_PAPER_METRICS
 from src.utils.random_seed import set_seed
 
@@ -395,6 +395,7 @@ def main():
             raise ValueError(f"Unknown --parameter: {args.parameter}")
         args.sensitivity = alias[args.parameter]
     cfg = load_yaml(args.config)
+    validate_config(cfg)
     if args.output_dir:
         cfg['paths']['outputs'] = args.output_dir
     plan = _resolve_plan(args)
