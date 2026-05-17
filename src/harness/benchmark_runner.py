@@ -4,6 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 from src.env.ebus_drone_env import EBusDroneEnv
 from src.harness.evaluator import evaluate_policy
+from src.harness.methods import normalize_method_name
 from src.harness.trainer import train_agent
 from src.harness.result_aggregator import aggregate
 from src.rl.agents.am_dueling_ddqn_dr_agent import AMDuelingDDQNDRAgent
@@ -13,7 +14,7 @@ from src.rl.agents.dqn_dr_agent import DQNDRAgent
 from src.policies import BatteryThresholdPolicy, DwellGreedyPolicy, LearnedPolicy, MaxFeasiblePolicy, NoChargingPolicy, UniformPolicy
 from src.utils.metrics import REQUIRED_PAPER_METRICS
 
-AGENT_MAP={"dqn_dr":DQNDRAgent,"ddqn_dr":DDQNDRAgent,"am_ddqn_dr":AMDDQNDRAgent,"proposed":AMDuelingDDQNDRAgent,"am_dueling_ddqn_dr":AMDuelingDDQNDRAgent}
+AGENT_MAP={"dqn_dr":DQNDRAgent,"ddqn_dr":DDQNDRAgent,"am_ddqn_dr":AMDDQNDRAgent,"am_dueling_ddqn_dr":AMDuelingDDQNDRAgent}
 
 
 def _checkpoint_agent_config_path(ckpt: Path) -> Path:
@@ -40,9 +41,9 @@ def _resolve_agent_config(method: str, obs_dim: int, action_dim: int, cfg: dict 
     resolved['obs_dim'] = int(base.get('obs_dim', obs_dim))
     resolved['action_dim'] = int(base.get('action_dim', action_dim))
     if 'dueling' not in resolved:
-        resolved['dueling'] = method in {'proposed', 'am_dueling_ddqn_dr'}
+        resolved['dueling'] = method in {'am_dueling_ddqn_dr'}
     if 'use_action_mask' not in resolved:
-        resolved['use_action_mask'] = method in {'am_ddqn_dr', 'proposed', 'am_dueling_ddqn_dr'}
+        resolved['use_action_mask'] = method in {'am_ddqn_dr', 'am_dueling_ddqn_dr'}
     return resolved
 
 
@@ -52,21 +53,11 @@ def _validate_architecture_or_raise(agent_cfg: dict, obs_dim: int, action_dim: i
         mismatches.append(f"obs_dim saved={agent_cfg.get('obs_dim')} current={obs_dim}")
     if int(agent_cfg.get('action_dim', action_dim)) != int(action_dim):
         mismatches.append(f"action_dim saved={agent_cfg.get('action_dim')} current={action_dim}")
-    expected_dueling = method in {'proposed', 'am_dueling_ddqn_dr'}
+    expected_dueling = method in {'am_dueling_ddqn_dr'}
     if bool(agent_cfg.get('dueling', expected_dueling)) != expected_dueling:
         mismatches.append(f"dueling saved={agent_cfg.get('dueling')} expected_for_method={expected_dueling}")
     if mismatches:
         raise ValueError(f"Checkpoint architecture mismatch for {ckpt}: " + "; ".join(mismatches))
-
-
-def normalize_method_name(method:str)->str:
-    if method == 'dwell_based_greedy':
-        return 'dwell_greedy'
-    if method == 'proposed':
-        return 'am_dueling_ddqn_dr'
-    if method == 'uniform':
-        return 'uniform_45'
-    return method
 
 
 def uniform_seconds_from_method(method: str) -> int:
@@ -86,7 +77,7 @@ def build_policy(method: str, env: EBusDroneEnv, out_root='outputs', checkpoint:
     if method == 'dwell_greedy': return DwellGreedyPolicy()
     if method == 'battery_threshold': return BatteryThresholdPolicy()
     if method not in AGENT_MAP: raise ValueError(f'Unknown method: {method}')
-    ckpt = Path(checkpoint) if checkpoint else Path(out_root)/'checkpoints'/f'{method}_{instance_name}_seed_{seed}.pt'
+    ckpt = Path(checkpoint) if checkpoint else Path(out_root)/'checkpoints'/f'checkpoint_{method}_{instance_name}_seed_{seed}.pt'
     if not ckpt.exists():
         if not train_if_missing:
             raise FileNotFoundError(f"Missing checkpoint for learning method '{method}': {ckpt}. Re-run with --train-if-missing.")

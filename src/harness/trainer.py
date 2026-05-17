@@ -11,23 +11,22 @@ from src.rl.agents.ddqn_dr_agent import DDQNDRAgent
 from src.rl.agents.am_ddqn_dr_agent import AMDDQNDRAgent
 from src.rl.agents.am_dueling_ddqn_dr_agent import AMDuelingDDQNDRAgent
 from src.rl.sketch_buffer import SketchBuffer
+from src.harness.methods import normalize_method_name
 
-LEARNING_METHODS = {"dqn_dr", "ddqn_dr", "am_ddqn_dr", "proposed", "am_dueling_ddqn_dr"}
-CANONICAL_METHOD_ALIASES = {"proposed": "am_dueling_ddqn_dr"}
+LEARNING_METHODS = {"dqn_dr", "ddqn_dr", "am_ddqn_dr", "am_dueling_ddqn_dr"}
 
 
 def _agent_cls(method: str):
-    method = CANONICAL_METHOD_ALIASES.get(method, method)
+    method = normalize_method_name(method)
     return {
         "dqn_dr": DQNDRAgent,
         "ddqn_dr": DDQNDRAgent,
         "am_ddqn_dr": AMDDQNDRAgent,
-        "proposed": AMDuelingDDQNDRAgent,
         "am_dueling_ddqn_dr": AMDuelingDDQNDRAgent,
     }.get(method, AMDuelingDDQNDRAgent)
 
 
-def train_agent(env, method: str = "proposed", episodes: int | None = 5, max_steps: int | None = 100, smoke_test: bool = False, out_root: str = "outputs", cfg: dict | None = None, seed: int | None = 0, instance_name: str = "unknown", resume: bool = False, checkpoint: str | None = None):
+def train_agent(env, method: str = "am_dueling_ddqn_dr", episodes: int | None = 5, max_steps: int | None = 100, smoke_test: bool = False, out_root: str = "outputs", cfg: dict | None = None, seed: int | None = 0, instance_name: str = "unknown", resume: bool = False, checkpoint: str | None = None):
     obs, _ = env.reset(seed=seed)
     cfg = dict(cfg or {})
     rl_cfg = dict(cfg.get("rl", {}))
@@ -38,11 +37,11 @@ def train_agent(env, method: str = "proposed", episodes: int | None = 5, max_ste
     rl_cfg.setdefault("action_set_seconds", cfg.get("charging", {}).get("action_set_seconds", []))
     cfg_method = rl_cfg.get("method")
     if method is None:
-        method = cfg_method or "proposed"
+        method = cfg_method or "am_dueling_ddqn_dr"
     cfg_seed = rl_cfg.get("seed")
     if seed is None:
         seed = int(cfg_seed) if cfg_seed is not None else 0
-    method = CANONICAL_METHOD_ALIASES.get(method, method)
+    method = normalize_method_name(method)
     cls = _agent_cls(method)
     agent = cls(len(obs), len(env.get_action_mask()), rl_cfg)
     print(f"[train_agent] selected device={agent.device} torch={torch.__version__} cuda_available={torch.cuda.is_available()} gpu_name={(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A')}", flush=True)
@@ -80,11 +79,11 @@ def train_agent(env, method: str = "proposed", episodes: int | None = 5, max_ste
     (out / "configs").mkdir(parents=True, exist_ok=True)
     (out / "done").mkdir(parents=True, exist_ok=True)
     csv_path = out / "metrics" / f"train_log_{method}_{instance_name}_seed_{seed}.csv"
-    fieldnames = ["episode", "method", "instance", "seed", "episode_reward", "total_cost", "onboard_passenger_delay", "parcel_lateness", "undelivered_parcel_count", "minimum_bus_battery", "battery_safety_violation_count", "total_energy_consumption", "station_power_overload_amount", "locker_overflow_amount", "mean_requested_action", "mean_executed_action", "epsilon", "loss", "runtime_sec", "termination_reason"]
+    fieldnames = ["episode", "method", "instance", "seed", "episode_reward", "total_cost", "onboard_passenger_delay", "parcel_lateness", "undelivered_parcel_count", "minimum_bus_battery", "battery_safety_violation_count", "total_energy_consumption", "station_power_overload_amount", "locker_overflow_amount", "mean_requested_action", "mean_executed_action", "epsilon", "loss", "runtime_sec", "termination_reason", "episode_steps", "truncated_by_max_steps", "delayed_reward_sketch_count", "completed_transition_count", "incomplete_sketch_count", "terminal_transition_count", "replay_insertions_episode", "paper_ready_episode"]
     start_ep = 0
     best_metric = None
     if resume:
-        ckpt_path = Path(checkpoint) if checkpoint else out / "checkpoints" / f"{method}_{instance_name}_seed_{seed}_last.pt"
+        ckpt_path = Path(checkpoint) if checkpoint else out / "checkpoints" / f"checkpoint_{method}_{instance_name}_seed_{seed}_last.pt"
         if ckpt_path.exists():
             agent.load_checkpoint(str(ckpt_path))
             loaded = torch.load(str(ckpt_path), map_location=agent.device)
@@ -196,6 +195,14 @@ def train_agent(env, method: str = "proposed", episodes: int | None = 5, max_ste
             "loss": sum(losses)/len(losses) if losses else "",
             "runtime_sec": ep_runtime,
             "termination_reason": termination_reason or ("horizon_reached" if episode_end_time >= operating_horizon else "unknown"),
+            "episode_steps": dec,
+            "truncated_by_max_steps": bool(truncated_by_max_steps),
+            "delayed_reward_sketch_count": delayed_reward_sketch_count,
+            "completed_transition_count": completed_transition_count,
+            "incomplete_sketch_count": incomplete_sketch_count,
+            "terminal_transition_count": terminal_transition_count,
+            "replay_insertions_episode": replay_insertions_episode,
+            "paper_ready_episode": bool(not truncated_by_max_steps and (termination_reason or "") == "horizon_reached"),
         }
             rows.append(row)
             writer.writerow(row); csv_file.flush()
@@ -203,16 +210,16 @@ def train_agent(env, method: str = "proposed", episodes: int | None = 5, max_ste
                 print(f"[train] method={method} instance={instance_name} seed={seed} ep={ep+1}/{episodes} reward={ep_reward:.4f} total_cost={ep_cost:.4f} epsilon={agent._eps():.4f} loss={(sum(losses)/len(losses) if losses else 'NA')} mean_executed_action={(action_sum/dec if dec else 0.0):.4f} min_battery={row['minimum_bus_battery']:.4f} termination={row['termination_reason']} runtime_sec={ep_runtime:.2f}", flush=True)
             ckpt_payload = agent.checkpoint_dict() | {"episode": ep + 1, "global_step": agent.steps, "epsilon": agent._eps(), "training_config": effective_cfg, "best_metric": best_metric}
             if (ep + 1) % ckpt_last_every == 0:
-                torch.save(ckpt_payload, out / "checkpoints" / f"{method}_{instance_name}_seed_{seed}_last.pt")
+                torch.save(ckpt_payload, out / "checkpoints" / f"checkpoint_{method}_{instance_name}_seed_{seed}_last.pt")
             if (ep + 1) % ckpt_periodic_every == 0:
-                torch.save(ckpt_payload, out / "checkpoints" / f"{method}_{instance_name}_seed_{seed}_ep{ep+1}.pt")
+                torch.save(ckpt_payload, out / "checkpoints" / f"checkpoint_{method}_{instance_name}_seed_{seed}_ep{ep+1}.pt")
             if best_metric is None or ep_cost < best_metric:
                 best_metric = ep_cost
                 ckpt_payload["best_metric"] = best_metric
-                torch.save(ckpt_payload, out / "checkpoints" / f"{method}_{instance_name}_seed_{seed}_best.pt")
-    ckpt = out / "checkpoints" / f"{method}_{instance_name}_seed_{seed}.pt"
+                torch.save(ckpt_payload, out / "checkpoints" / f"checkpoint_{method}_{instance_name}_seed_{seed}_best.pt")
+    ckpt = out / "checkpoints" / f"checkpoint_{method}_{instance_name}_seed_{seed}.pt"
     agent.save_checkpoint(str(ckpt))
-    best_ckpt = out / "checkpoints" / f"{method}_{instance_name}_seed_{seed}_best.pt"
+    best_ckpt = out / "checkpoints" / f"checkpoint_{method}_{instance_name}_seed_{seed}_best.pt"
     agent.save_checkpoint(str(best_ckpt))
     agent_effective_config = dict(rl_cfg)
     agent_effective_config.update({
@@ -222,8 +229,8 @@ def train_agent(env, method: str = "proposed", episodes: int | None = 5, max_ste
         "hidden_layers": rl_cfg.get("hidden_layers", [128, 128]),
         "learning_rate": rl_cfg.get("learning_rate", rl_cfg.get("lr", 1e-3)),
         "gamma": rl_cfg.get("gamma", 0.99),
-        "dueling": method in {"proposed", "am_dueling_ddqn_dr"},
-        "use_action_mask": method in {"am_ddqn_dr", "proposed", "am_dueling_ddqn_dr"},
+        "dueling": method in {"am_dueling_ddqn_dr"},
+        "use_action_mask": method in {"am_ddqn_dr", "am_dueling_ddqn_dr"},
         "device": rl_cfg.get("device", "auto"),
     })
     cfg_path = ckpt.with_suffix('.agent_config.json')
