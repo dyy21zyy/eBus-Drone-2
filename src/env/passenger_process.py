@@ -49,6 +49,7 @@ def sample_initial_passenger_event(*, queue: int, onboard: int, capacity: int, a
         "onboard_before_alight": max(int(onboard), 0),
         "alighting": n_al,
         "initial_board": n_bo_initial,
+        "n_bo_0": n_bo_initial,
         "queue_after_initial": queue_after_initial,
         "onboard_after_initial": onboard_after_initial,
         "remaining_capacity_after_initial": max(int(capacity) - onboard_after_initial, 0),
@@ -62,30 +63,35 @@ def finalize_passenger_service(*, initial_event: dict, capacity: int, rate_per_m
     normal = simulate_arrivals_during_dwell(initial_event["queue_after_initial"], initial_event["onboard_after_initial"], capacity, rate_per_min, passenger_dwell, rng)
     onboard_after_normal = int(initial_event["onboard_after_initial"]) + normal["boarded"]
 
-    normal_boarding_extension = max(float(rho_bo_min_per_pax), 0.0) * normal["boarded"]
-    passenger_dwell += normal_boarding_extension
+    tau_q = max(float(rho_bo_min_per_pax), 0.0) * normal["boarded"]
+    passenger_dwell += tau_q
 
     baseline_non_pax = max(max(float(parcel_unloading_time_min), 0.0), max(float(charging_duration_min), 0.0))
     excess_interval = max(0.0, baseline_non_pax - passenger_dwell)
     extra = {"arrivals": 0, "boarded": 0, "queue_after": normal["queue_after"]}
-    extra_extension = 0.0
+    tau_e = 0.0
     onboard_final = onboard_after_normal
     if excess_interval > 0.0:
         extra = simulate_arrivals_during_dwell(normal["queue_after"], onboard_after_normal, capacity, rate_per_min, excess_interval, rng)
         onboard_final = onboard_after_normal + extra["boarded"]
-        extra_extension = max(float(rho_bo_min_per_pax), 0.0) * extra["boarded"]
+        tau_e = max(float(rho_bo_min_per_pax), 0.0) * extra["boarded"]
 
-    realized_dwell = max(passenger_dwell, baseline_non_pax) + extra_extension
+    realized_dwell = max(passenger_dwell, baseline_non_pax) + tau_e
     affected_passengers = max(0, int(onboard_final))
     return {
         "alighting": int(initial_event["alighting"]),
         "initial_board": int(initial_event["initial_board"]),
         "board_during_normal": normal["boarded"],
         "board_during_excess": extra["boarded"],
+        "n_bo_q": normal["boarded"],
+        "n_bo_e": extra["boarded"],
         "total_board": int(initial_event["initial_board"]) + normal["boarded"] + extra["boarded"],
+        "n_bo": int(initial_event["initial_board"]) + normal["boarded"] + extra["boarded"],
         "onboard_final": onboard_final,
         "queue_final": extra["queue_after"],
         "passenger_dwell_min": passenger_dwell,
+        "tau_q": tau_q,
+        "tau_e": tau_e,
         "realized_dwell_min": realized_dwell,
         "chi": bool(initial_event.get("chi", False)),
         "affected_passengers": affected_passengers,
