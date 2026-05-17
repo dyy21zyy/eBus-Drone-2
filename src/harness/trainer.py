@@ -30,6 +30,11 @@ def train_agent(env, method: str = "am_dueling_ddqn_dr", episodes: int | None = 
     obs, _ = env.reset(seed=seed)
     cfg = dict(cfg or {})
     rl_cfg = dict(cfg.get("rl", {}))
+    rl_cfg["method"] = normalize_method_name(method) if method is not None else normalize_method_name(rl_cfg.get("method", "am_dueling_ddqn_dr"))
+    if "epsilon_decay_steps" not in rl_cfg:
+        frac = float(rl_cfg.get("epsilon_decay_fraction", 0.8))
+        ep_for_decay = int(episodes) if episodes is not None else int(rl_cfg.get("episodes", 5000))
+        rl_cfg["epsilon_decay_steps"] = max(1, int(frac * ep_for_decay))
     rl_cfg.setdefault("batch_size", 8 if smoke_test else 32)
     rl_cfg.setdefault("warmup_steps", 4 if smoke_test else 20)
     rl_cfg.setdefault("target_update_interval", 10)
@@ -193,6 +198,7 @@ def train_agent(env, method: str = "am_dueling_ddqn_dr", episodes: int | None = 
             "locker_overflow_amount": float(episode_metrics.get("locker_overflow_amount", 0.0)),
             "mean_requested_action": (action_sum / dec) if dec else "",
             "mean_executed_action": (action_sum / dec) if dec else "",
+            "epsilon": float(agent._eps()),
             "loss": sum(losses)/len(losses) if losses else "",
             "runtime_sec": ep_runtime,
             "termination_reason": termination_reason or ("horizon_reached" if episode_end_time >= operating_horizon else "unknown"),
