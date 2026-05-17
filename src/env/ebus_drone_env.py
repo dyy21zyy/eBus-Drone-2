@@ -170,19 +170,37 @@ class EBusDroneEnv:
         if slice_min <= 0:
             slice_min = 1.0
         t = float(start_t)
-        def _next_pending_release_time(after_t: float) -> float | None:
+        def _next_low_level_event_time(after_t: float) -> float | None:
             nxt = None
             for st in self.station_states.values():
                 for rel in st.get("pending_parcel_releases", []):
                     rt = float(rel.get("release_time_min", 0.0))
                     if rt > after_t + 1e-9 and (nxt is None or rt < nxt):
                         nxt = rt
+                for interval in st.get("bus_charging_intervals", []):
+                    et = float(interval.get("end_time_min", 0.0))
+                    if et > after_t + 1e-9 and (nxt is None or et < nxt):
+                        nxt = et
+                for m in st.get("active_drone_missions", []):
+                    rt = float(m.get("eta_return_min", m.get("drone_return_time", 0.0)))
+                    if rt > after_t + 1e-9 and (nxt is None or rt < nxt):
+                        nxt = rt
+                for job in st.get("charging_batteries", []):
+                    ct = float(job.get("completion_time_min", 0.0))
+                    if ct > after_t + 1e-9 and (nxt is None or ct < nxt):
+                        nxt = ct
+            for p in self.parcel_states.values():
+                ct = p.get("delivery_completion_time_min", p.get("delivery_completion_time"))
+                if p.get("status") == "assigned_to_drone" and ct is not None:
+                    ctf = float(ct)
+                    if ctf > after_t + 1e-9 and (nxt is None or ctf < nxt):
+                        nxt = ctf
             return nxt
         while t < end_t - 1e-9:
             t_next = min(end_t, t + slice_min)
-            next_release = _next_pending_release_time(t)
-            if next_release is not None:
-                t_next = min(t_next, next_release)
+            next_event = _next_low_level_event_time(t)
+            if next_event is not None:
+                t_next = min(t_next, next_event)
             for st in self.station_states.values():
                 p_e = self._active_bus_charging_load_kw(st, t)
                 p_l = self._base_load_kw(st, t)
