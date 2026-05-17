@@ -175,21 +175,22 @@ def train_agent(env, method: str = "am_dueling_ddqn_dr", episodes: int | None = 
             operating_horizon = float(getattr(env, "horizon", getattr(env, "delivery_evaluation_horizon", getattr(env, "state", {}).get("horizon", 0.0))))
             episode_end_time = float(getattr(env, "state", {}).get("time", 0.0))
             ep_runtime = float(time.time() - t0)
+            episode_metrics = env.get_episode_metrics() if hasattr(env, "get_episode_metrics") else {}
             row = {
             "episode": ep + 1,
             "method": method,
             "instance": instance_name,
             "seed": int(seed),
             "episode_reward": ep_reward,
-            "total_cost": ep_cost,
-            "onboard_passenger_delay": float(getattr(env, "metrics", {}).get("onboard_passenger_delay", 0.0)) if hasattr(env, "metrics") else 0.0,
-            "parcel_lateness": float(getattr(env, "metrics", {}).get("parcel_lateness", 0.0)) if hasattr(env, "metrics") else 0.0,
-            "undelivered_parcel_count": float(getattr(env, "metrics", {}).get("undelivered_parcel_count", 0.0)) if hasattr(env, "metrics") else 0.0,
-            "minimum_bus_battery": float(getattr(env, "metrics", {}).get("minimum_bus_battery", env.state.get("battery", 0.0))) if hasattr(env, "state") else 0.0,
-            "battery_safety_violation_count": bat_dep,
-            "total_energy_consumption": float(getattr(env, "metrics", {}).get("total_energy_consumption", 0.0)) if hasattr(env, "metrics") else 0.0,
-            "station_power_overload_amount": float(getattr(env, "metrics", {}).get("station_power_overload_amount", 0.0)) if hasattr(env, "metrics") else 0.0,
-            "locker_overflow_amount": float(getattr(env, "metrics", {}).get("locker_overflow_amount", 0.0)) if hasattr(env, "metrics") else 0.0,
+            "total_cost": float(episode_metrics.get("total_cost", ep_cost)),
+            "onboard_passenger_delay": float(episode_metrics.get("onboard_passenger_delay", 0.0)),
+            "parcel_lateness": float(episode_metrics.get("parcel_lateness", 0.0)),
+            "undelivered_parcel_count": float(episode_metrics.get("undelivered_parcel_count", 0.0)),
+            "minimum_bus_battery": float(episode_metrics.get("minimum_bus_battery", env.state.get("battery", 0.0))) if hasattr(env, "state") else 0.0,
+            "battery_safety_violation_count": float(episode_metrics.get("battery_safety_violation_count", bat_dep)),
+            "total_energy_consumption": float(episode_metrics.get("total_energy_consumption", 0.0)),
+            "station_power_overload_amount": float(episode_metrics.get("station_power_overload_amount", 0.0)),
+            "locker_overflow_amount": float(episode_metrics.get("locker_overflow_amount", 0.0)),
             "mean_requested_action": (action_sum / dec) if dec else "",
             "mean_executed_action": (action_sum / dec) if dec else "",
             "loss": sum(losses)/len(losses) if losses else "",

@@ -82,11 +82,11 @@ power:
   nominal_base_load_max_kw: 180.0
   disturbance_std_kw: 8.0
 reward:
-  alpha_1: 0.01
+  alpha_1: 1.0
   alpha_2: 1.0
-  alpha_3: 1.0
+  alpha_3: 0.2
   alpha_4: 1.0
-  alpha_5: 1.0
+  alpha_5: 5.0
   alpha_6: 1.0
   energy_cost_per_kwh: 1.0
   eta_l_term: 1.0
