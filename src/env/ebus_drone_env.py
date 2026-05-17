@@ -376,7 +376,7 @@ class EBusDroneEnv:
 
 
     def _reward_alphas(self) -> dict:
-        return self.config.get("reward", {"alpha_1": 0.01, "alpha_2": 1.0, "alpha_3": 1.0, "alpha_4": 1.0, "alpha_5": 1.0, "alpha_6": 1.0})
+        return self.config.get("reward", {"alpha_1": 1.0, "alpha_2": 1.0, "alpha_3": 0.2, "alpha_4": 1.0, "alpha_5": 5.0, "alpha_6": 1.0})
 
 
     def _snapshot_cumulative_metrics(self) -> dict:
@@ -574,6 +574,36 @@ class EBusDroneEnv:
         reported_unload_ids = unload_ids if int(bus["trip_id"]) in self.freight_carrying_trip_ids else []
         reported_qf = qf if reported_unload_ids else 0.0
         return self._build_obs_for_current_event(), float(reward), terminated, False, {"executed_action_index": ex_idx, "executed_duration": dur, "executed_duration_min": dur / 60.0, "selected_action": int(action_index), "requested_action": int(action_index), "executed_action": int(ex_idx), "action_repaired": ex_idx != action_index, "was_action_repaired": ex_idx != action_index, "invalid_action": invalid_action, "invalid_action_count": int(self.episode_metrics.get("invalid_action_count", 0)), "action_repair_count": int(self.episode_metrics.get("action_repair_count", 0)), "repair_reason": repair_reason, "feasible_action_count": feasible_count, "termination_reason": reason, "reward_components": rc, "event": e, "unloaded_parcels": reported_unload_ids, "unloading_volume_kg": reported_qf, "unloading_duration_min": reported_qf * unloading_time_per_kg_min, "parcel_release_time_min": release_time, "current_trip_id": bus["trip_id"], "current_bus_id": bus["vehicle_id"], "current_station_id": st["station_id"], "transition_start_time": transition_start_time, "transition_end_time": float(self.state.get("time", dep)), "passenger_delay_delta": rc.get("passenger_delay", 0.0), "parcel_lateness_delta": rc.get("parcel_lateness", 0.0) - rc.get("terminal_penalty", 0.0), "late_delivery_count_delta": rc.get("late_delivery_count_delta", 0.0), "delivered_count_delta": rc.get("delivered_count_delta", 0.0), "undelivered_terminal_count": undelivered_terminal_count, "energy_consumption_delta": rc.get("total_energy_kwh", 0.0), "power_overload_delta": rc.get("power_overload", 0.0), "battery_violation_delta": rc.get("battery_safety", 0.0), "locker_overflow_delta": rc.get("locker_overflow", 0.0), "terminal_undelivered_penalty": rc.get("terminal_penalty", 0.0), "feasible_action_mask": mask.tolist(), "passenger_service": service, "dwell_components": {"passenger_dwell_min": passenger_dwell_min, "freight_dwell_min": freight_dwell_min, "charging_duration_min": charging_duration_min, "realized_dwell_min": realized_dwell_min, "additional_dwell_min": additional_dwell_min, "affected_passengers": affected_passengers, "event_passenger_delay": event_passenger_delay}, "departure_time_min": dep, "bus_operating_delay_delta": additional_dwell_min}
+
+
+    def get_episode_metrics(self) -> dict:
+        cumulative = self._snapshot_cumulative_metrics()
+        reward_sums = dict(self.episode_metrics.get("reward_component_sums", {}))
+        decision_events = int(self.episode_metrics.get("number_decision_events", 0))
+        avg_excess = (cumulative["bus_operating_delay"] / decision_events) if decision_events > 0 else 0.0
+        return {
+            "total_cost": float(reward_sums.get("total_cost", 0.0)),
+            "total_reward": float(reward_sums.get("reward", 0.0)),
+            "onboard_passenger_delay": float(cumulative["passenger_delay"]),
+            "average_excess_dwell_time": float(avg_excess),
+            "total_bus_operating_delay": float(cumulative["bus_operating_delay"]),
+            "parcel_lateness": float(cumulative["parcel_lateness"] + self.episode_metrics.get("terminal_penalty", 0.0)),
+            "late_delivery_count": float(cumulative["late_delivery_count"]),
+            "undelivered_parcel_count": float(len(self._terminal_undelivered_parcels(float(self.state.get("time", 0.0))))),
+            "terminal_undelivered_penalty": float(self.episode_metrics.get("terminal_penalty", 0.0)),
+            "minimum_bus_battery": float(min((b.get("battery_kwh", 0.0) for b in self.bus_states.values()), default=0.0)),
+            "battery_safety_violation_count": float(sum(1 for b in self.bus_states.values() if float(b.get("battery_kwh", 0.0)) < float(b.get("safety_battery_kwh", 0.0)))),
+            "total_energy_consumption": float(cumulative["energy_consumption"]),
+            "station_power_overload_amount": float(cumulative["power_overload"]),
+            "locker_overflow_amount": float(cumulative["locker_overflow"]),
+            "station_power_overload_duration": float(cumulative["power_overload_duration"]),
+            "locker_overflow_duration": float(cumulative["locker_overflow_duration"]),
+            "average_charging_duration": float(self.episode_metrics.get("executed_action_sum", 0.0) / decision_events) if decision_events else 0.0,
+            "valid_charging_opportunity_count": float(decision_events),
+            "invalid_action_count": float(self.episode_metrics.get("invalid_action_count", 0.0)),
+            "episode_length_decisions": float(decision_events),
+            "reward_component_sums": reward_sums,
+        }
 
     def _refresh_global_state_features(self):
         now = float(self.state.get("time", 0.0))

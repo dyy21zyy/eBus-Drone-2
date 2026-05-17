@@ -118,6 +118,10 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
     # Definition: stockout frequency counts dispatch-trigger opportunities where waiting feasible parcels and idle drones exist but no full battery is available.
     metrics['drone_battery_stockout_count'] = float(sum(float(st.get('dispatch_stockout_count', 0.0)) for st in stations))
 
+    env_episode_metrics = env.get_episode_metrics() if hasattr(env, 'get_episode_metrics') else {}
+    for k in ['total_cost','total_reward','onboard_passenger_delay','total_bus_operating_delay','parcel_lateness','late_delivery_count','undelivered_parcel_count','terminal_undelivered_penalty','minimum_bus_battery','battery_safety_violation_count','total_energy_consumption','station_power_overload_amount','locker_overflow_amount','invalid_action_count']:
+        if k in env_episode_metrics:
+            metrics[k] = float(env_episode_metrics[k])
     out = finalize_metrics(metrics)
     out['max_steps'] = max_steps
     out['episode_end_time'] = end_time
@@ -126,6 +130,9 @@ def evaluate_policy(env, policy, episodes: int = 1, max_steps: int | None = None
     out['truncated_by_max_steps'] = bool(truncated_by_max_steps)
     out['full_horizon_completed'] = bool(terminated_by_env and out['termination_reason'] == 'horizon_reached' and not truncated_by_max_steps)
     out['operating_horizon'] = out['operating_horizon_min']
+    out['average_charging_duration'] = float(env_episode_metrics.get('average_charging_duration', 0.0))
+    out['valid_charging_opportunity_count'] = float(env_episode_metrics.get('valid_charging_opportunity_count', out.get('steps', 0.0)))
+    out['episode_length_decisions'] = float(env_episode_metrics.get('episode_length_decisions', out.get('steps', 0.0)))
     missing = [k for k in REQUIRED_PAPER_METRICS if k not in out]
     if missing:
         raise KeyError(f"Missing required paper metrics in evaluator output: {missing}")
