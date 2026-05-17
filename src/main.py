@@ -94,6 +94,18 @@ def _save_run_metadata(run_dir: Path, cfg: dict, args: argparse.Namespace, plan:
     (run_dir / "cli_args.json").write_text(json.dumps(vars(args), indent=2), encoding="utf-8")
 
 
+def _write_named_summary(source_csv: Path, target_csv: Path):
+    _require_exists(source_csv, f"Missing source summary: {source_csv}")
+    rows = list(csv.DictReader(source_csv.open("r", encoding="utf-8")))
+    if not rows:
+        raise ValueError(f"Empty summaries are invalid: {source_csv}")
+    target_csv.parent.mkdir(parents=True, exist_ok=True)
+    with target_csv.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        w.writeheader()
+        w.writerows(rows)
+
+
 def _validate_args(args):
     if args.method and args.methods and args.method != "no_charging":
         raise ValueError("Use either --method or --methods, not both.")
@@ -354,6 +366,7 @@ def main():
     ap.add_argument('--checkpoint'); ap.add_argument('--train-if-missing', action='store_true')
     ap.add_argument('--resume', action='store_true')
     ap.add_argument('--factor'); ap.add_argument('--values', nargs='+', type=float)
+    ap.add_argument('--parameter')
     ap.add_argument('--sensitivity')
     ap.add_argument('--max-steps', type=int, default=None)
     ap.add_argument('--allow-truncated-for-testing', action='store_true')
@@ -364,6 +377,23 @@ def main():
     if args.smoke_test:
         args.smoke = True
     _validate_args(args)
+    if args.parameter and args.sensitivity:
+        raise ValueError("Use either --parameter or --sensitivity, not both.")
+    if args.parameter:
+        alias = {
+            "passenger_demand_intensity": "passenger_intensity",
+            "chargers_per_station": "chargers_per_station",
+            "charging_power": "charging_power",
+            "station_power_capacity": "station_power_capacity",
+            "parcel_demand": "num_customers",
+            "trip_freight_capacity": "bus_freight_capacity",
+            "drone_resources": "drones_per_station",
+            "locker_capacity": "locker_capacity",
+            "freight_trip_availability": "freight_trip_availability",
+        }
+        if args.parameter not in alias:
+            raise ValueError(f"Unknown --parameter: {args.parameter}")
+        args.sensitivity = alias[args.parameter]
     cfg = load_yaml(args.config)
     if args.output_dir:
         cfg['paths']['outputs'] = args.output_dir
@@ -429,10 +459,12 @@ def main():
                 if out.exists() and not args.overwrite:
                     raise FileExistsError(f"Output exists and overwrite is disabled: {out}")
                 run_benchmark(plan['methods'], str(out), env_builder=lambda sd, _i=i: build_env(cfg, _i, sd, args.smoke), instance_name=i, test_seeds=plan['seeds'], cfg=cfg, smoke_test=args.smoke, train_if_missing=args.train_if_missing)
+                _write_named_summary(out, Path(cfg['paths']['outputs']) / "results" / "overall_performance_summary.csv")
         if args.mode == 'ablation':
             for i in plan['instances']:
                 out = Path(cfg['paths']['outputs']) / 'results' / 'ablation' / i / 'summary.csv'
                 run_ablation(str(out), env_builder=lambda sd, _i=i: build_env(cfg, _i, sd, args.smoke), instance_name=i, test_seeds=plan['seeds'], cfg=cfg, smoke_test=args.smoke, train_if_missing=args.train_if_missing)
+                _write_named_summary(out, Path(cfg['paths']['outputs']) / "results" / "ablation_summary.csv")
         if args.mode == 'sensitivity':
             vals = args.values or [1.0]
             cfg['_sensitivity_hooks'] = _sensitivity_hooks(cfg)
@@ -441,6 +473,7 @@ def main():
                 for factor in factors:
                     out = Path(cfg['paths']['outputs']) / 'results' / 'sensitivity' / i / f'{factor}.csv'
                     run_sensitivity(plan['methods'], str(out), env_builder=lambda sd, c, _i=i: build_env(c, _i, sd, args.smoke), instance_name=i, test_seeds=plan['seeds'], cfg=cfg, factor=factor, values=vals, smoke_test=args.smoke, train_if_missing=args.train_if_missing)
+                    _write_named_summary(out, Path(cfg['paths']['outputs']) / "results" / "sensitivity_summary.csv")
         return
     if args.mode == 'export_tables':
         _export_tables(Path(cfg['paths']['outputs']), args.experiment or 'benchmark', include_smoke=bool(args.include_smoke))
