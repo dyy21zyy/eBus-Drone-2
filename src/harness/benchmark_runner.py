@@ -86,7 +86,27 @@ def build_policy(method: str, env: EBusDroneEnv, out_root='outputs', checkpoint:
     if not ckpt.exists():
         if not train_if_missing:
             raise FileNotFoundError(f"Missing checkpoint for learning method '{method}': {ckpt}. Re-run with --train-if-missing.")
-        _, path = train_agent(env, method=method, episodes=1 if smoke_test else 20, max_steps=10 if smoke_test else 100, smoke_test=smoke_test, out_root=out_root, cfg=cfg, seed=seed, instance_name=instance_name, log_interval=log_interval)
+        rl_cfg = (cfg or {}).get('rl', {})
+        if smoke_test:
+            train_episodes = 1
+            train_max_steps = 10
+        else:
+            train_episodes = rl_cfg.get('train_if_missing_episodes')
+            if train_episodes is None:
+                train_episodes = rl_cfg.get('episodes', 5000)
+            train_max_steps = rl_cfg.get('train_if_missing_max_steps')
+        _, path = train_agent(
+            env,
+            method=method,
+            episodes=int(train_episodes),
+            max_steps=10 if smoke_test else (int(train_max_steps) if train_max_steps is not None else None),
+            smoke_test=smoke_test,
+            out_root=out_root,
+            cfg=cfg,
+            seed=seed,
+            instance_name=instance_name,
+            log_interval=log_interval,
+        )
         ckpt = Path(path)
     obs,_=env.reset(seed=seed)
     obs_dim = len(obs)
