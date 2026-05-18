@@ -71,7 +71,7 @@ def uniform_seconds_from_method(method: str, cfg: dict | None = None) -> int:
             return int(suffix)
     raise ValueError(f"Method is not a uniform charging policy: {method}")
 
-def build_policy(method: str, env: EBusDroneEnv, out_root='outputs', checkpoint: str|None=None, train_if_missing: bool=False, smoke_test: bool=False, cfg:dict|None=None, seed:int=0, instance_name:str='unknown'):
+def build_policy(method: str, env: EBusDroneEnv, out_root='outputs', checkpoint: str|None=None, train_if_missing: bool=False, smoke_test: bool=False, cfg:dict|None=None, seed:int=0, instance_name:str='unknown', log_interval: int | None = None):
     uniform_duration_sec = None
     if str(method).strip().lower().startswith('uniform'):
         uniform_duration_sec = uniform_seconds_from_method(method, cfg=cfg)
@@ -86,7 +86,7 @@ def build_policy(method: str, env: EBusDroneEnv, out_root='outputs', checkpoint:
     if not ckpt.exists():
         if not train_if_missing:
             raise FileNotFoundError(f"Missing checkpoint for learning method '{method}': {ckpt}. Re-run with --train-if-missing.")
-        _, path = train_agent(env, method=method, episodes=1 if smoke_test else 20, max_steps=10 if smoke_test else 100, smoke_test=smoke_test, out_root=out_root, cfg=cfg, seed=seed, instance_name=instance_name)
+        _, path = train_agent(env, method=method, episodes=1 if smoke_test else 20, max_steps=10 if smoke_test else 100, smoke_test=smoke_test, out_root=out_root, cfg=cfg, seed=seed, instance_name=instance_name, log_interval=log_interval)
         ckpt = Path(path)
     obs,_=env.reset(seed=seed)
     obs_dim = len(obs)
@@ -100,7 +100,7 @@ def build_policy(method: str, env: EBusDroneEnv, out_root='outputs', checkpoint:
         raise RuntimeError(f"Failed to load checkpoint due to network architecture mismatch for {ckpt}: {exc}") from exc
     return LearnedPolicy(agent)
 
-def run_benchmark(methods, out_csv: str, env_builder, instance_name:str, test_seeds:list[int], cfg:dict, smoke_test: bool = False, train_if_missing:bool=False):
+def run_benchmark(methods, out_csv: str, env_builder, instance_name:str, test_seeds:list[int], cfg:dict, smoke_test: bool = False, train_if_missing:bool=False, log_interval: int | None = None):
     methods=[normalize_method_name(m) for m in methods]
     rows=[]
     eval_episodes = int(cfg.get('rl', {}).get('benchmark_eval_episodes', cfg.get('rl', {}).get('evaluation_episodes', 1)))
@@ -108,7 +108,8 @@ def run_benchmark(methods, out_csv: str, env_builder, instance_name:str, test_se
         for m in methods:
             env = env_builder(seed)
             t0=time.time()
-            pol = build_policy(m, env, out_root=cfg['paths']['outputs'], train_if_missing=train_if_missing, smoke_test=smoke_test, cfg=cfg, seed=seed, instance_name=instance_name)
+            print(f"[benchmark] instance={instance_name} seed={seed} method={m} started", flush=True)
+            pol = build_policy(m, env, out_root=cfg['paths']['outputs'], train_if_missing=train_if_missing, smoke_test=smoke_test, cfg=cfg, seed=seed, instance_name=instance_name, log_interval=log_interval)
             per_ep=[]
             for ep_i in range(eval_episodes):
                 em = evaluate_policy(env, pol, episodes=1, max_steps=10 if smoke_test else None, allow_debug_truncation=bool(smoke_test))
@@ -120,6 +121,7 @@ def run_benchmark(methods, out_csv: str, env_builder, instance_name:str, test_se
             if m == 'uniform':
                 met['uniform_duration_sec'] = uniform_seconds_from_method(m, cfg=cfg)
             rows.append(met)
+            print(f"[benchmark] instance={instance_name} seed={seed} method={m} completed total_cost={met.get('total_cost', 'NA')} runtime_sec={met.get('runtime_sec', 'NA')}", flush=True)
     if not rows: raise ValueError('Benchmark produced no rows.')
     for m in methods:
         if not any(r['method']==m for r in rows): raise ValueError(f'No results for method: {m}')

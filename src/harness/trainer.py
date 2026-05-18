@@ -27,7 +27,7 @@ def _agent_cls(method: str):
     }.get(method, AMDuelingDDQNDRAgent)
 
 
-def train_agent(env, method: str = "am_dueling_ddqn_dr", episodes: int | None = 5, max_steps: int | None = 100, smoke_test: bool = False, out_root: str = "outputs", cfg: dict | None = None, seed: int | None = 0, instance_name: str = "unknown", resume: bool = False, checkpoint: str | None = None):
+def train_agent(env, method: str = "am_dueling_ddqn_dr", episodes: int | None = 5, max_steps: int | None = 100, smoke_test: bool = False, out_root: str = "outputs", cfg: dict | None = None, seed: int | None = 0, instance_name: str = "unknown", resume: bool = False, checkpoint: str | None = None, log_interval: int | None = None):
     obs, _ = env.reset(seed=seed)
     cfg = dict(cfg or {})
     rl_cfg = dict(cfg.get("rl", {}))
@@ -75,7 +75,7 @@ def train_agent(env, method: str = "am_dueling_ddqn_dr", episodes: int | None = 
     }
     print(f"[train_agent] effective training config: {json.dumps(effective_cfg, sort_keys=True)}")
     rows = []
-    progress_every = int(rl_cfg.get("progress_print_every", 10))
+    progress_every = int(log_interval) if log_interval is not None else int(rl_cfg.get("progress_print_every", 10))
     ckpt_last_every = int(rl_cfg.get("checkpoint_last_every", 100))
     ckpt_periodic_every = int(rl_cfg.get("checkpoint_periodic_every", 1000))
     out = Path(out_root)
@@ -228,8 +228,28 @@ def train_agent(env, method: str = "am_dueling_ddqn_dr", episodes: int | None = 
         }
             rows.append(row)
             writer.writerow(row); csv_file.flush()
-            if (ep == start_ep) or ((ep + 1) % progress_every == 0) or (ep + 1 == episodes):
-                print(f"[train] method={method} instance={instance_name} seed={seed} ep={ep+1}/{episodes} reward={ep_reward:.4f} total_cost={ep_cost:.4f} epsilon={agent._eps():.4f} loss={(sum(losses)/len(losses) if losses else 'NA')} mean_executed_action={(action_sum/dec if dec else 0.0):.4f} min_battery={row['minimum_bus_battery']:.4f} termination={row['termination_reason']} runtime_sec={ep_runtime:.2f}", flush=True)
+            should_log = progress_every > 0 and (((ep + 1) % progress_every == 0) or (ep + 1 == episodes))
+            if should_log:
+                def _fmt(v, p=3):
+                    if v is None or (isinstance(v, float) and (v != v)):
+                        return "NA"
+                    try:
+                        return f"{float(v):.{p}f}"
+                    except Exception:
+                        return "NA"
+                msg = (
+                    f"[train][episode] method={method} instance={instance_name} seed={seed} ep={ep+1}/{episodes} "
+                    f"reward={_fmt(row.get('episode_reward'), 2)} cost={_fmt(row.get('episode_cost'), 2)} "
+                    f"ma10={_fmt(row.get('moving_avg_reward_10'), 2)} ma50={_fmt(row.get('moving_avg_reward_50'), 2)} "
+                    f"epsilon={_fmt(row.get('epsilon'), 3)} loss={_fmt(row.get('loss_mean'), 3)} "
+                    f"steps={int(row.get('steps', 0)) if str(row.get('steps', '')).strip() else 'NA'} "
+                    f"min_battery={_fmt(row.get('minimum_bus_battery'), 2)} "
+                    f"battery_viol={_fmt(row.get('battery_safety_violation_count'), 0)} "
+                    f"term={row.get('termination_reason') or 'NA'} elapsed={_fmt(row.get('runtime_sec'), 1)}s"
+                )
+                print(msg, flush=True)
+            if progress_every > 0 and (((ep + 1) % progress_every == 0) or (ep + 1 == episodes)):
+                export_training_curve(str(out), instance_name, method, int(seed), rows, smoke=bool(smoke_test))
             ckpt_payload = agent.checkpoint_dict() | {"episode": ep + 1, "global_step": agent.steps, "epsilon": agent._eps(), "training_config": effective_cfg, "best_metric": best_metric}
             if (ep + 1) % ckpt_last_every == 0:
                 torch.save(ckpt_payload, out / "checkpoints" / f"checkpoint_{method}_{instance_name}_seed_{seed}_last.pt")

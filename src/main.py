@@ -377,6 +377,7 @@ def main():
     ap.add_argument('--output-dir')
     ap.add_argument('--overwrite', action='store_true')
     ap.add_argument('--include-smoke', action='store_true')
+    ap.add_argument('--log-interval', type=int, default=10)
     args = ap.parse_args()
     if args.smoke_test:
         args.smoke = True
@@ -434,6 +435,7 @@ def main():
                     instance_name=i,
                     resume=bool(args.resume),
                     checkpoint=args.checkpoint,
+                    log_interval=args.log_interval,
                 )
         return
     if args.mode == 'eval':
@@ -457,17 +459,29 @@ def main():
         if args.mode == 'pipeline':
             for i in plan['instances']:
                 for s in plan['seeds']:
-                    run_generate(cfg, i, s); run_offline(cfg, i, s)
+                    print(f"[pipeline] instance={i} seed={s} phase=generate started", flush=True)
+                    run_generate(cfg, i, s)
+                    print(f"[pipeline] instance={i} seed={s} phase=offline started", flush=True)
+                    run_offline(cfg, i, s)
         if args.mode in ('benchmark', 'pipeline'):
             for i in plan['instances']:
                 out = Path(cfg['paths']['outputs']) / 'results' / (args.experiment or 'benchmark') / i / 'summary.csv'
                 if out.exists() and not args.overwrite:
                     raise FileExistsError(f"Output exists and overwrite is disabled: {out}")
-                run_benchmark(plan['methods'], str(out), env_builder=lambda sd, _i=i: build_env(cfg, _i, sd, args.smoke), instance_name=i, test_seeds=plan['seeds'], cfg=cfg, smoke_test=args.smoke, train_if_missing=args.train_if_missing)
+                if args.mode == 'pipeline':
+                    for s in plan['seeds']:
+                        for m in [normalize_method_name(x) for x in plan['methods']]:
+                            if m in {"dqn_dr","ddqn_dr","am_ddqn_dr","am_dueling_ddqn_dr"} and args.train_if_missing:
+                                print(f"[pipeline] instance={i} seed={s} method={m} phase=train started", flush=True)
+                            print(f"[pipeline] instance={i} seed={s} method={m} phase=eval started", flush=True)
+                run_benchmark(plan['methods'], str(out), env_builder=lambda sd, _i=i: build_env(cfg, _i, sd, args.smoke), instance_name=i, test_seeds=plan['seeds'], cfg=cfg, smoke_test=args.smoke, train_if_missing=args.train_if_missing, log_interval=args.log_interval)
                 for _m in [normalize_method_name(x) for x in plan['methods']]:
                     aggregate_curves(cfg['paths']['outputs'], i, _m, 'train')
                     aggregate_curves(cfg['paths']['outputs'], i, _m, 'eval')
                 _write_named_summary(out, Path(cfg['paths']['outputs']) / "results" / "overall_performance_summary.csv")
+                if args.mode == 'pipeline':
+                    for s in plan['seeds']:
+                        print(f"[pipeline] instance={i} seed={s} completed", flush=True)
         if args.mode == 'ablation':
             for i in plan['instances']:
                 out = Path(cfg['paths']['outputs']) / 'results' / 'ablation' / i / 'summary.csv'

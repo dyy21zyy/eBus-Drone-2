@@ -22,6 +22,12 @@ def _ensure_dir(path: Path):
     path.mkdir(parents=True, exist_ok=True)
 
 
+def _atomic_to_csv(df: pd.DataFrame, path: Path):
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    df.to_csv(tmp, index=False)
+    tmp.replace(path)
+
+
 def export_training_curve(out_root: str, instance: str, method: str, seed: int, rows: list[dict], smoke: bool = False) -> Path:
     curve_dir = Path(out_root) / "curves" / "train" / instance
     _ensure_dir(curve_dir)
@@ -37,7 +43,7 @@ def export_training_curve(out_root: str, instance: str, method: str, seed: int, 
         if c not in df.columns:
             df[c] = math.nan
     df["smoke"] = bool(smoke)
-    df.to_csv(path, index=False)
+    _atomic_to_csv(df, path)
     _plot_training(df, Path(out_root), instance, method, seed)
     return path
 
@@ -77,7 +83,7 @@ def export_eval_curves(out_root: str, instance: str, method: str, seed: int, row
         if c not in df.columns:
             df[c] = math.nan
     df["smoke"] = bool(smoke)
-    df.to_csv(eval_path, index=False)
+    _atomic_to_csv(df, eval_path)
     cdf = pd.DataFrame({"eval_episode": df["eval_episode"]})
     for col, out in [("total_cost","cumulative_mean_total_cost"), ("total_reward","cumulative_mean_total_reward")]:
         s = pd.to_numeric(df[col], errors="coerce")
@@ -88,7 +94,7 @@ def export_eval_curves(out_root: str, instance: str, method: str, seed: int, row
     cdf["cumulative_mean_minimum_bus_battery"] = pd.to_numeric(df["minimum_bus_battery"], errors="coerce").expanding(min_periods=1).mean()
     fh = pd.to_numeric(df["full_horizon_completed"], errors="coerce").fillna(0.0)
     cdf["cumulative_success_rate_full_horizon"] = fh.expanding(min_periods=1).mean()
-    cdf.to_csv(cum_path, index=False)
+    _atomic_to_csv(cdf, cum_path)
     _plot_eval(df, cdf, Path(out_root), instance, method, seed)
     return eval_path, cum_path
 
@@ -139,7 +145,7 @@ def aggregate_curves(out_root: str, instance: str, method: str, curve_type: str)
     out = out.sort_values(idx_col)
     agg_name = f"{method}_{'train_curve_agg.csv' if curve_type=='train' else 'eval_curve_agg.csv'}"
     agg_path = curve_dir / agg_name
-    out.to_csv(agg_path, index=False)
+    _atomic_to_csv(out, agg_path)
     _plot_agg(out_root, instance, method, curve_type, out, idx_col)
     return agg_path
 
