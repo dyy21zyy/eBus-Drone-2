@@ -73,3 +73,69 @@ def test_training_episode_emits_delayed_reward_metrics_and_terminal_transition(t
     assert int(row["terminal_transition_count"]) == 1
     assert int(row["replay_insertions_episode"]) == 1
     assert float(row["episode_reward"]) == -11.0
+
+
+def test_replay_buffer_total_added_counts_insertions_after_capacity():
+    rb = ReplayBuffer(capacity=3)
+    for i in range(5):
+        rb.add(
+            observation=np.array([float(i)], dtype=np.float32),
+            action_index=0,
+            reward=1.0,
+            next_observation=np.array([float(i + 1)], dtype=np.float32),
+            done=False,
+            action_mask=np.array([1.0], dtype=np.float32),
+            next_action_mask=np.array([1.0], dtype=np.float32),
+            info={},
+        )
+    assert len(rb) == 3
+    assert rb.total_added == 5
+
+
+class _MultiStepTerminalEnv:
+    def __init__(self, done_after=8):
+        self.done_after = done_after
+        self.state = {"time": 0.0}
+        self._steps = 0
+
+    def reset(self, seed=None):
+        self._steps = 0
+        self.state = {"time": 0.0}
+        return np.array([0.0, 1.0], dtype=np.float32), {}
+
+    def get_action_mask(self):
+        return np.array([1.0, 1.0], dtype=np.float32)
+
+    def step(self, _action):
+        self._steps += 1
+        self.state["time"] = float(self._steps * 10.0)
+        done = self._steps >= self.done_after
+        return (
+            np.array([1.0, 0.0], dtype=np.float32),
+            1.0,
+            done,
+            False,
+            {"termination_reason": "horizon_reached" if done else None, "reward_components": {}},
+        )
+
+
+def test_training_accounting_uses_total_insertions_when_buffer_is_full(tmp_path):
+    env = _MultiStepTerminalEnv(done_after=8)
+    train_agent(
+        env,
+        method="proposed",
+        episodes=2,
+        smoke_test=False,
+        out_root=str(tmp_path),
+        cfg={"rl": {"episodes": 2, "replay_buffer_size": 5, "batch_size": 2, "warmup_steps": 1, "progress_print_every": 1}},
+        seed=2,
+        instance_name="small",
+    )
+    with (tmp_path / "metrics" / "train_log_am_dueling_ddqn_dr_small_seed_2.csv").open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 2
+    assert int(rows[0]["replay_insertions_episode"]) == 8
+    assert int(rows[1]["replay_insertions_episode"]) == 8
+    assert int(rows[1]["completed_transition_count"]) == 8
+    assert int(rows[1]["buffer_len"]) == 5
+    assert int(rows[1]["buffer_total_added"]) == 16

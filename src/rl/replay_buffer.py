@@ -24,6 +24,7 @@ class ReplayBuffer:
     def __init__(self, capacity: int = 10000):
         self.capacity = int(capacity)
         self.data: deque[Transition] = deque(maxlen=self.capacity)
+        self.total_added = 0
 
     def add(
         self,
@@ -48,6 +49,11 @@ class ReplayBuffer:
                 info=info or {},
             )
         )
+        self.total_added += 1
+
+    @property
+    def total_insertions(self) -> int:
+        return int(self.total_added)
 
     def sample(self, batch_size: int) -> list[Transition]:
         return random.sample(self.data, min(batch_size, len(self.data)))
