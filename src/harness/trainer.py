@@ -12,6 +12,7 @@ from src.rl.agents.am_ddqn_dr_agent import AMDDQNDRAgent
 from src.rl.agents.am_dueling_ddqn_dr_agent import AMDuelingDDQNDRAgent
 from src.rl.sketch_buffer import SketchBuffer
 from src.harness.methods import normalize_method_name
+from src.harness.curve_export import export_training_curve
 
 LEARNING_METHODS = {"dqn_dr", "ddqn_dr", "am_ddqn_dr", "am_dueling_ddqn_dr"}
 
@@ -84,7 +85,7 @@ def train_agent(env, method: str = "am_dueling_ddqn_dr", episodes: int | None = 
     (out / "configs").mkdir(parents=True, exist_ok=True)
     (out / "done").mkdir(parents=True, exist_ok=True)
     csv_path = out / "metrics" / f"train_log_{method}_{instance_name}_seed_{seed}.csv"
-    fieldnames = ["episode", "method", "instance", "seed", "episode_reward", "total_cost", "onboard_passenger_delay", "parcel_lateness", "undelivered_parcel_count", "minimum_bus_battery", "battery_safety_violation_count", "total_energy_consumption", "station_power_overload_amount", "locker_overflow_amount", "mean_requested_action", "mean_executed_action", "epsilon", "loss", "runtime_sec", "termination_reason", "episode_steps", "truncated_by_max_steps", "delayed_reward_sketch_count", "completed_transition_count", "incomplete_sketch_count", "terminal_transition_count", "replay_insertions_episode", "paper_ready_episode"]
+    fieldnames = ["episode", "method", "instance", "seed", "episode_reward", "episode_cost", "total_reward", "total_cost", "moving_avg_reward_10", "moving_avg_reward_50", "moving_avg_cost_10", "moving_avg_cost_50", "onboard_passenger_delay", "parcel_lateness", "late_delivery_count", "undelivered_parcel_count", "minimum_bus_battery", "battery_safety_violation_count", "total_energy_consumption", "station_power_overload_amount", "locker_overflow_amount", "mean_requested_action", "mean_executed_action", "epsilon", "loss", "loss_mean", "loss_last", "runtime_sec", "termination_reason", "steps", "episode_length_decisions", "episode_steps", "truncated_by_max_steps", "delayed_reward_sketch_count", "completed_transition_count", "incomplete_sketch_count", "terminal_transition_count", "replay_insertions_episode", "paper_ready_episode"]
     start_ep = 0
     best_metric = None
     if resume:
@@ -181,15 +182,25 @@ def train_agent(env, method: str = "am_dueling_ddqn_dr", episodes: int | None = 
             episode_end_time = float(getattr(env, "state", {}).get("time", 0.0))
             ep_runtime = float(time.time() - t0)
             episode_metrics = env.get_episode_metrics() if hasattr(env, "get_episode_metrics") else {}
+            loss_mean = (sum(losses)/len(losses)) if losses else float("nan")
+            last10 = rows[-9:] + [{"episode_reward": ep_reward, "episode_cost": float(episode_metrics.get("total_cost", ep_cost))}]
+            last50 = rows[-49:] + [{"episode_reward": ep_reward, "episode_cost": float(episode_metrics.get("total_cost", ep_cost))}]
             row = {
             "episode": ep + 1,
             "method": method,
             "instance": instance_name,
             "seed": int(seed),
             "episode_reward": ep_reward,
+            "episode_cost": float(episode_metrics.get("total_cost", ep_cost)),
+            "total_reward": ep_reward,
             "total_cost": float(episode_metrics.get("total_cost", ep_cost)),
+            "moving_avg_reward_10": sum(float(r.get("episode_reward", float("nan"))) for r in last10)/len(last10),
+            "moving_avg_reward_50": sum(float(r.get("episode_reward", float("nan"))) for r in last50)/len(last50),
+            "moving_avg_cost_10": sum(float(r.get("episode_cost", float("nan"))) for r in last10)/len(last10),
+            "moving_avg_cost_50": sum(float(r.get("episode_cost", float("nan"))) for r in last50)/len(last50),
             "onboard_passenger_delay": float(episode_metrics.get("onboard_passenger_delay", 0.0)),
             "parcel_lateness": float(episode_metrics.get("parcel_lateness", 0.0)),
+            "late_delivery_count": float(episode_metrics.get("late_delivery_count", 0.0)),
             "undelivered_parcel_count": float(episode_metrics.get("undelivered_parcel_count", 0.0)),
             "minimum_bus_battery": float(episode_metrics.get("minimum_bus_battery", env.state.get("battery", 0.0))) if hasattr(env, "state") else 0.0,
             "battery_safety_violation_count": float(episode_metrics.get("battery_safety_violation_count", bat_dep)),
@@ -199,9 +210,13 @@ def train_agent(env, method: str = "am_dueling_ddqn_dr", episodes: int | None = 
             "mean_requested_action": (action_sum / dec) if dec else "",
             "mean_executed_action": (action_sum / dec) if dec else "",
             "epsilon": float(agent._eps()),
-            "loss": sum(losses)/len(losses) if losses else "",
+            "loss": loss_mean,
+            "loss_mean": loss_mean,
+            "loss_last": (float(losses[-1]) if losses else float("nan")),
             "runtime_sec": ep_runtime,
             "termination_reason": termination_reason or ("horizon_reached" if episode_end_time >= operating_horizon else "unknown"),
+            "steps": dec,
+            "episode_length_decisions": dec,
             "episode_steps": dec,
             "truncated_by_max_steps": bool(truncated_by_max_steps),
             "delayed_reward_sketch_count": delayed_reward_sketch_count,
@@ -249,4 +264,5 @@ def train_agent(env, method: str = "am_dueling_ddqn_dr", episodes: int | None = 
         json.dump({"seed": seed, "method": method, "instance": instance_name, "runtime_sec": time.time()-t0, "effective_training_config": effective_cfg, "rows": rows}, f, indent=2)
     with (out / "configs" / f"train_{method}_{instance_name}_seed_{seed}.json").open("w", encoding="utf-8") as f:
         json.dump({"seed": seed, "method": method, "instance": instance_name, "config": cfg, "effective_training_config": effective_cfg}, f, indent=2)
+    export_training_curve(str(out), instance_name, method, int(seed), rows, smoke=bool(smoke_test))
     return agent, str(ckpt)

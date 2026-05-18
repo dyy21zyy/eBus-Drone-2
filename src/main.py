@@ -13,6 +13,7 @@ from src.env.ebus_drone_env import EBusDroneEnv
 from src.harness.ablation_runner import run_ablation
 from src.harness.benchmark_runner import build_policy, normalize_method_name, run_benchmark, uniform_seconds_from_method
 from src.harness.evaluator import evaluate_policy, save_eval_metrics
+from src.harness.curve_export import export_eval_curves, aggregate_curves
 from src.harness.sensitivity_runner import FACTOR_PATHS, run_sensitivity
 from src.harness.trainer import train_agent
 from src.offline.assignment_data_builder import build_assignment_data
@@ -145,8 +146,10 @@ def _run_eval(cfg, instance, seed, method, args, rows):
         pol = build_policy(method)
     eval_eps = int(args.episodes) if args.episodes is not None else int(cfg.get("rl", {}).get("evaluation_episodes", 1))
     per_ep = []
-    for _ in range(eval_eps):
-        per_ep.append(evaluate_policy(env, pol, episodes=1, max_steps=args.max_steps if args.max_steps is not None else (10 if args.smoke else None), allow_debug_truncation=bool(args.smoke or args.allow_truncated_for_testing)))
+    for ep_i in range(eval_eps):
+        rec = evaluate_policy(env, pol, episodes=1, max_steps=args.max_steps if args.max_steps is not None else (10 if args.smoke else None), allow_debug_truncation=bool(args.smoke or args.allow_truncated_for_testing))
+        rec.update({"eval_episode": ep_i + 1, "method": normalize_method_name(method), "instance": instance, "seed": seed})
+        per_ep.append(rec)
     m = {}
     numeric_keys = {k for r in per_ep for k, v in r.items() if isinstance(v, (int, float))}
     for k in per_ep[0].keys():
@@ -172,6 +175,7 @@ def _run_eval(cfg, instance, seed, method, args, rows):
     m["success_rate"] = sum(1.0 for r in per_ep if str(r.get("termination_reason", "")) == "horizon_reached") / len(per_ep)
     m["battery_depletion_rate"] = sum(1.0 for r in per_ep if float(r.get("minimum_bus_battery", 1.0)) <= 0.0) / len(per_ep)
     m.update({'method': normalize_method_name(method), 'instance': instance, 'seed': seed, 'smoke': bool(args.smoke), 'sum_total_cost': sum(float(r.get("total_cost", 0.0)) for r in per_ep), 'sum_total_reward': sum(float(r.get("total_reward", 0.0)) for r in per_ep)})
+    export_eval_curves(cfg['paths']['outputs'], instance, normalize_method_name(method), int(seed), per_ep, smoke=bool(args.smoke))
     rows.append(m)
 
 
@@ -460,6 +464,9 @@ def main():
                 if out.exists() and not args.overwrite:
                     raise FileExistsError(f"Output exists and overwrite is disabled: {out}")
                 run_benchmark(plan['methods'], str(out), env_builder=lambda sd, _i=i: build_env(cfg, _i, sd, args.smoke), instance_name=i, test_seeds=plan['seeds'], cfg=cfg, smoke_test=args.smoke, train_if_missing=args.train_if_missing)
+                for _m in [normalize_method_name(x) for x in plan['methods']]:
+                    aggregate_curves(cfg['paths']['outputs'], i, _m, 'train')
+                    aggregate_curves(cfg['paths']['outputs'], i, _m, 'eval')
                 _write_named_summary(out, Path(cfg['paths']['outputs']) / "results" / "overall_performance_summary.csv")
         if args.mode == 'ablation':
             for i in plan['instances']:
