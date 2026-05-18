@@ -8,6 +8,17 @@ from src.policies.dwell_greedy_policy import DwellGreedyPolicy
 import csv
 
 
+
+class _NoopAgent:
+    def __init__(self, *_args, **_kwargs):
+        pass
+
+    def load_checkpoint(self, _path):
+        return None
+
+    def select_action(self, _obs, _mask):
+        return 0
+
 class _LongEpisodeEnv:
     def __init__(self, done_after: int = 5):
         self.done_after = done_after
@@ -338,3 +349,60 @@ def test_rule_policies_only_select_feasible_actions():
     pol_bat = BatteryThresholdPolicy()
     a_bat = pol_bat.select_action(obs, mask, {"E_current": 0.0, "E_min": 40.0, "E_max": 160.0})
     assert mask[a_bat] == 1
+
+
+def test_build_policy_train_if_missing_formal_uses_rl_episodes(tmp_path, monkeypatch):
+    env = EBusDroneEnv(smoke_test=True)
+    monkeypatch.setitem(__import__('src.harness.benchmark_runner', fromlist=['AGENT_MAP']).AGENT_MAP, "am_dueling_ddqn_dr", _NoopAgent)
+    calls = {}
+
+    def fake_train_agent(*args, **kwargs):
+        calls.update(kwargs)
+        ckpt = tmp_path / 'checkpoints' / 'checkpoint_am_dueling_ddqn_dr_small_seed_1.pt'
+        ckpt.parent.mkdir(parents=True, exist_ok=True)
+        ckpt.write_text('x', encoding='utf-8')
+        return None, str(ckpt)
+
+    monkeypatch.setattr('src.harness.benchmark_runner.train_agent', fake_train_agent)
+    cfg = {'paths': {'outputs': str(tmp_path)}, 'rl': {'episodes': 123}}
+    build_policy('proposed', env, out_root=str(tmp_path), train_if_missing=True, smoke_test=False, cfg=cfg, seed=1, instance_name='small')
+    assert calls['episodes'] == 123
+    assert calls['max_steps'] is None
+
+
+def test_build_policy_train_if_missing_smoke_is_fast(tmp_path, monkeypatch):
+    env = EBusDroneEnv(smoke_test=True)
+    monkeypatch.setitem(__import__('src.harness.benchmark_runner', fromlist=['AGENT_MAP']).AGENT_MAP, "am_dueling_ddqn_dr", _NoopAgent)
+    calls = {}
+
+    def fake_train_agent(*args, **kwargs):
+        calls.update(kwargs)
+        ckpt = tmp_path / 'checkpoints' / 'checkpoint_am_dueling_ddqn_dr_small_seed_1.pt'
+        ckpt.parent.mkdir(parents=True, exist_ok=True)
+        ckpt.write_text('x', encoding='utf-8')
+        return None, str(ckpt)
+
+    monkeypatch.setattr('src.harness.benchmark_runner.train_agent', fake_train_agent)
+    cfg = {'paths': {'outputs': str(tmp_path)}, 'rl': {'episodes': 999}}
+    build_policy('proposed', env, out_root=str(tmp_path), train_if_missing=True, smoke_test=True, cfg=cfg, seed=1, instance_name='small')
+    assert calls['episodes'] == 1
+    assert calls['max_steps'] == 10
+
+
+def test_build_policy_train_if_missing_episode_override(tmp_path, monkeypatch):
+    env = EBusDroneEnv(smoke_test=True)
+    monkeypatch.setitem(__import__('src.harness.benchmark_runner', fromlist=['AGENT_MAP']).AGENT_MAP, "am_dueling_ddqn_dr", _NoopAgent)
+    calls = {}
+
+    def fake_train_agent(*args, **kwargs):
+        calls.update(kwargs)
+        ckpt = tmp_path / 'checkpoints' / 'checkpoint_am_dueling_ddqn_dr_small_seed_1.pt'
+        ckpt.parent.mkdir(parents=True, exist_ok=True)
+        ckpt.write_text('x', encoding='utf-8')
+        return None, str(ckpt)
+
+    monkeypatch.setattr('src.harness.benchmark_runner.train_agent', fake_train_agent)
+    cfg = {'paths': {'outputs': str(tmp_path)}, 'rl': {'episodes': 123, 'train_if_missing_episodes': 77, 'train_if_missing_max_steps': 42}}
+    build_policy('proposed', env, out_root=str(tmp_path), train_if_missing=True, smoke_test=False, cfg=cfg, seed=1, instance_name='small')
+    assert calls['episodes'] == 77
+    assert calls['max_steps'] == 42
