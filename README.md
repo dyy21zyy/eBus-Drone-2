@@ -141,3 +141,31 @@ Paper-scale launch examples:
 python -m src.main --mode benchmark --config configs/default.yaml --instance medium --seeds 1 2 3 --methods uniform_30 battery_threshold am_dueling_ddqn_dr
 python -m src.main --mode sensitivity --config configs/default.yaml --instance medium --seeds 1 2 --methods uniform_30 am_dueling_ddqn_dr --sensitivity demand_intensity_factor --values 0.75 1.0 1.25
 ```
+
+## Training and evaluation curves
+
+RL runs automatically export paper-ready curve artifacts under the selected output directory:
+
+- Training CSVs: `<output-dir>/curves/train/<instance>/<method>_seed_<seed>_train_curve.csv`
+- Evaluation CSVs: `<output-dir>/curves/eval/<instance>/<method>_seed_<seed>_eval_curve.csv`
+- Evaluation cumulative CSVs: `<output-dir>/curves/eval/<instance>/<method>_seed_<seed>_eval_cumulative_curve.csv`
+- Training figures: `<output-dir>/figures/train/<instance>/...png`
+- Evaluation figures: `<output-dir>/figures/eval/<instance>/...png`
+
+You can inspect curves with pandas:
+
+```python
+import pandas as pd
+train_df = pd.read_csv('outputs_formal/curves/train/small/am_dueling_ddqn_dr_seed_1_train_curve.csv')
+eval_df = pd.read_csv('outputs_formal/curves/eval/small/am_dueling_ddqn_dr_seed_1_eval_curve.csv')
+```
+
+Use these CSV/PNG artifacts directly for convergence and evaluation-stability plots in the paper appendices and main figures.
+
+Example commands:
+
+```bash
+python -m src.main --mode train --config configs/default.yaml --instance small --seed 1 --method am_dueling_ddqn_dr --output-dir outputs_formal
+python -m src.main --mode eval --config configs/default.yaml --instance small --seed 1 --method am_dueling_ddqn_dr --output-dir outputs_formal
+python -m src.main --mode pipeline --config configs/default.yaml --instance small --seeds 1 2 3 --methods no_charging uniform battery_threshold dwell_greedy max_feasible am_dueling_ddqn_dr --train-if-missing --output-dir outputs_formal --overwrite
+```

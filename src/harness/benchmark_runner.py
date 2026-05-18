@@ -7,6 +7,7 @@ from src.harness.evaluator import evaluate_policy
 from src.harness.methods import normalize_method_name
 from src.harness.trainer import train_agent
 from src.harness.result_aggregator import aggregate
+from src.harness.curve_export import export_eval_curves
 from src.rl.agents.am_dueling_ddqn_dr_agent import AMDuelingDDQNDRAgent
 from src.rl.agents.am_ddqn_dr_agent import AMDDQNDRAgent
 from src.rl.agents.ddqn_dr_agent import DDQNDRAgent
@@ -108,6 +109,12 @@ def run_benchmark(methods, out_csv: str, env_builder, instance_name:str, test_se
             env = env_builder(seed)
             t0=time.time()
             pol = build_policy(m, env, out_root=cfg['paths']['outputs'], train_if_missing=train_if_missing, smoke_test=smoke_test, cfg=cfg, seed=seed, instance_name=instance_name)
+            per_ep=[]
+            for ep_i in range(eval_episodes):
+                em = evaluate_policy(env, pol, episodes=1, max_steps=10 if smoke_test else None, allow_debug_truncation=bool(smoke_test))
+                em.update({'eval_episode': ep_i+1, 'method':m,'instance':instance_name,'seed':seed,'runtime_sec':time.time()-t0,'smoke':bool(smoke_test),'smoke_mode':bool(smoke_test)})
+                per_ep.append(em)
+            export_eval_curves(cfg['paths']['outputs'], instance_name, m, int(seed), per_ep, smoke=bool(smoke_test))
             met=evaluate_policy(env, pol, episodes=eval_episodes, max_steps=10 if smoke_test else None, allow_debug_truncation=bool(smoke_test))
             met.update({'method':m,'instance':instance_name,'seed':seed,'runtime_sec':time.time()-t0,'smoke':bool(smoke_test),'smoke_mode':bool(smoke_test)})
             if m == 'uniform':
