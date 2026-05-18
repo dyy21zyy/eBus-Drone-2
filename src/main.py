@@ -48,12 +48,31 @@ def run_generate(cfg, instance_name: str, seed: int):
 
 
 def run_offline(cfg, instance_name: str, seed: int):
+    off = cfg.get("offline", {})
+    solver = str(off.get("solver", "scipy"))
+    solver_log = bool(off.get("solver_log", True))
+    print(f"[offline] instance={instance_name} seed={seed} phase=load_instance started", flush=True)
     instance = load_instance(instance_name, seed, cfg["paths"]["data_generated"])
+    print(f"[offline] instance={instance_name} seed={seed} phase=load_instance completed", flush=True)
+    print(f"[offline] instance={instance_name} seed={seed} phase=build_assignment_data started", flush=True)
     data = build_assignment_data(instance)
-    result = solve_assignment(data, allow_greedy_fallback=bool(cfg.get("offline", {}).get("allow_greedy_fallback", False)))
+    print(f"[offline] instance={instance_name} seed={seed} phase=build_assignment_data completed customers={len(data.customers)} freight_trips={len(data.trips)} stations={len(data.stations)}", flush=True)
+    print(f"[offline] instance={instance_name} seed={seed} phase=solve_assignment started solver={solver}", flush=True)
+    result = solve_assignment(
+        data,
+        allow_greedy_fallback=bool(off.get("allow_greedy_fallback", False)),
+        solver=solver,
+        time_limit_sec=off.get("time_limit_sec"),
+        mip_gap=off.get("mip_gap"),
+        solver_disp=bool(off.get("solver_disp", False)),
+        solver_log=solver_log,
+        auto_fallback_solver=off.get("auto_fallback_solver"),
+    )
+    print(f"[offline] instance={instance_name} seed={seed} phase=solve_assignment completed solver={solver} status={result.status} objective={result.objective_value} runtime_sec={result.runtime_sec} assigned={result.number_assigned_customers}/{result.number_customers}", flush=True)
     out = Path(cfg["paths"]["outputs"]) / "assignments" / f"offline_assignment_{instance_name}_seed_{seed}.json"
-    metadata = {"instance_name": instance_name, "seed": seed, **summarize_assignment_flows(data, result)}
+    metadata = {"instance_name": instance_name, "seed": seed, **summarize_assignment_flows(data, result), **(result.metadata or {})}
     write_assignment(result, str(out), metadata=metadata)
+    print(f"[offline] instance={instance_name} seed={seed} phase=write_assignment completed path={out}", flush=True)
 
 
 def _sensitivity_hooks(base_cfg: dict):
@@ -378,6 +397,13 @@ def main():
     ap.add_argument('--overwrite', action='store_true')
     ap.add_argument('--include-smoke', action='store_true')
     ap.add_argument('--log-interval', type=int, default=10)
+
+    ap.add_argument('--offline-solver', choices=['gurobi', 'scipy'])
+    ap.add_argument('--offline-time-limit', type=float)
+    ap.add_argument('--offline-mip-gap', type=float)
+    ap.add_argument('--offline-log', action='store_true')
+    ap.add_argument('--no-offline-log', action='store_true')
+    ap.add_argument('--offline-solver-disp', action='store_true')
     args = ap.parse_args()
     if args.smoke_test:
         args.smoke = True
@@ -403,6 +429,19 @@ def main():
     validate_config(cfg)
     if args.output_dir:
         cfg['paths']['outputs'] = args.output_dir
+    cfg.setdefault('offline', {})
+    if args.offline_solver:
+        cfg['offline']['solver'] = args.offline_solver
+    if args.offline_time_limit is not None:
+        cfg['offline']['time_limit_sec'] = args.offline_time_limit
+    if args.offline_mip_gap is not None:
+        cfg['offline']['mip_gap'] = args.offline_mip_gap
+    if args.offline_solver_disp:
+        cfg['offline']['solver_disp'] = True
+    if args.offline_log:
+        cfg['offline']['solver_log'] = True
+    if args.no_offline_log:
+        cfg['offline']['solver_log'] = False
     plan = _resolve_plan(args)
     print(json.dumps(plan, indent=2))
     run_dir = Path(cfg['paths']['outputs']) / 'runs' / f"{plan['mode']}_{(args.experiment or 'single')}"
@@ -443,8 +482,8 @@ def main():
         for i in plan['instances']:
             for seed in plan['seeds']:
                 _run_eval(cfg, i, seed, plan['methods'][0], args, rows)
-        canonical_method = normalize_method_name(plan['methods'][0])
-        out = Path(cfg['paths']['outputs']) / 'metrics' / f"eval_{canonical_method}_{plan['instances'][0]}_seed_{plan['seeds'][0]}.csv"
+        out_method = plan['methods'][0]
+        out = Path(cfg['paths']['outputs']) / 'metrics' / f"eval_{out_method}_{plan['instances'][0]}_seed_{plan['seeds'][0]}.csv"
         save_eval_metrics(rows, str(out)); print(json.dumps(rows)); return
     if args.mode == 'validate_pipeline':
         _run_smoke_validation(cfg, args)

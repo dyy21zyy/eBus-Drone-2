@@ -8,7 +8,13 @@ paths:
   data_generated: data/generated
   outputs: outputs
 offline:
-  allow_greedy_fallback: false
+  solver: scipy
+  time_limit_sec: 60
+  mip_gap: 0.05
+  solver_log: true
+  solver_disp: false
+  allow_greedy_fallback: true
+  auto_fallback_solver: scipy
 generation:
   bus_operation_horizon_minutes: 60
   delivery_evaluation_horizon_minutes: 90

@@ -6,7 +6,13 @@ paths:
   data_generated: data/generated
   outputs: outputs
 offline:
+  solver: gurobi
+  time_limit_sec: 600
+  mip_gap: 0.01
+  solver_log: true
+  solver_disp: false
   allow_greedy_fallback: false
+  auto_fallback_solver: scipy
 generation:
   bus_operation_horizon_minutes: 360  # T_bus [min]
   delivery_evaluation_horizon_minutes: 480  # T_del [min]
