@@ -17,6 +17,13 @@ from src.harness.curve_export import export_training_curve
 LEARNING_METHODS = {"dqn_dr", "ddqn_dr", "am_ddqn_dr", "am_dueling_ddqn_dr"}
 
 
+def _buffer_total_added(buffer) -> int:
+    if hasattr(buffer, "total_added"):
+        return int(getattr(buffer, "total_added"))
+    print("[train_agent][warning] ReplayBuffer missing total_added; falling back to len(buffer) for insertion accounting.", flush=True)
+    return int(len(buffer))
+
+
 def _agent_cls(method: str):
     method = normalize_method_name(method)
     return {
@@ -85,7 +92,7 @@ def train_agent(env, method: str = "am_dueling_ddqn_dr", episodes: int | None = 
     (out / "configs").mkdir(parents=True, exist_ok=True)
     (out / "done").mkdir(parents=True, exist_ok=True)
     csv_path = out / "metrics" / f"train_log_{method}_{instance_name}_seed_{seed}.csv"
-    fieldnames = ["episode", "method", "instance", "seed", "episode_reward", "episode_cost", "total_reward", "total_cost", "moving_avg_reward_10", "moving_avg_reward_50", "moving_avg_cost_10", "moving_avg_cost_50", "onboard_passenger_delay", "parcel_lateness", "late_delivery_count", "undelivered_parcel_count", "minimum_bus_battery", "battery_safety_violation_count", "total_energy_consumption", "station_power_overload_amount", "locker_overflow_amount", "mean_requested_action", "mean_executed_action", "epsilon", "loss", "loss_mean", "loss_last", "runtime_sec", "termination_reason", "steps", "episode_length_decisions", "episode_steps", "truncated_by_max_steps", "delayed_reward_sketch_count", "completed_transition_count", "incomplete_sketch_count", "terminal_transition_count", "replay_insertions_episode", "paper_ready_episode"]
+    fieldnames = ["episode", "method", "instance", "seed", "episode_reward", "episode_cost", "total_reward", "total_cost", "moving_avg_reward_10", "moving_avg_reward_50", "moving_avg_cost_10", "moving_avg_cost_50", "onboard_passenger_delay", "parcel_lateness", "late_delivery_count", "undelivered_parcel_count", "minimum_bus_battery", "battery_safety_violation_count", "total_energy_consumption", "station_power_overload_amount", "locker_overflow_amount", "mean_requested_action", "mean_executed_action", "epsilon", "loss", "loss_mean", "loss_last", "runtime_sec", "termination_reason", "steps", "episode_length_decisions", "episode_steps", "truncated_by_max_steps", "delayed_reward_sketch_count", "completed_transition_count", "incomplete_sketch_count", "terminal_transition_count", "replay_insertions_episode", "buffer_len", "buffer_total_added", "paper_ready_episode"]
     start_ep = 0
     best_metric = None
     if resume:
@@ -118,7 +125,7 @@ def train_agent(env, method: str = "am_dueling_ddqn_dr", episodes: int | None = 
             delayed_reward_sketch_count = 0
             completed_transition_count = 0
             terminal_transition_count = 0
-            replay_insertions_before = len(agent.buffer)
+            replay_insertions_before = _buffer_total_added(agent.buffer)
             termination_reason = None
             truncated_by_max_steps = False
             while True:
@@ -171,11 +178,22 @@ def train_agent(env, method: str = "am_dueling_ddqn_dr", episodes: int | None = 
                     termination_reason = info.get("termination_reason") or ("truncated" if trunc else None)
                     break
             incomplete_sketch_count = 1 if sketch.has_pending() else 0
-            replay_insertions_after = len(agent.buffer)
+            replay_insertions_after = _buffer_total_added(agent.buffer)
             replay_insertions_episode = replay_insertions_after - replay_insertions_before
+            buffer_len = len(agent.buffer)
+            buffer_capacity = int(getattr(agent.buffer, "capacity", buffer_len))
+            buffer_total_added = replay_insertions_after
             if not truncated_by_max_steps:
                 assert incomplete_sketch_count == 0, "incomplete_sketch_count must be zero at formal episode end"
-            assert completed_transition_count == replay_insertions_episode, "completed transitions must match replay insertions"
+            if completed_transition_count != replay_insertions_episode:
+                raise RuntimeError(
+                    "completed transitions must match replay insertions | "
+                    f"method={method} instance={instance_name} seed={seed} episode={ep + 1} "
+                    f"completed_transition_count={completed_transition_count} replay_insertions_episode={replay_insertions_episode} "
+                    f"buffer_len={buffer_len} buffer_capacity={buffer_capacity} buffer_total_added={buffer_total_added} "
+                    f"incomplete_sketch_count={incomplete_sketch_count} terminal_transition_count={terminal_transition_count} "
+                    f"termination_reason={termination_reason} truncated_by_max_steps={truncated_by_max_steps}"
+                )
             if termination_reason != "max_steps_truncated" and dec > 0:
                 assert terminal_transition_count == 1, "terminal transition must be stored exactly once"
             operating_horizon = float(getattr(env, "horizon", getattr(env, "delivery_evaluation_horizon", getattr(env, "state", {}).get("horizon", 0.0))))
@@ -224,6 +242,8 @@ def train_agent(env, method: str = "am_dueling_ddqn_dr", episodes: int | None = 
             "incomplete_sketch_count": incomplete_sketch_count,
             "terminal_transition_count": terminal_transition_count,
             "replay_insertions_episode": replay_insertions_episode,
+            "buffer_len": buffer_len,
+            "buffer_total_added": buffer_total_added,
             "paper_ready_episode": bool(not truncated_by_max_steps and (termination_reason or "") == "horizon_reached"),
         }
             rows.append(row)
@@ -245,12 +265,17 @@ def train_agent(env, method: str = "am_dueling_ddqn_dr", episodes: int | None = 
                     f"steps={int(row.get('steps', 0)) if str(row.get('steps', '')).strip() else 'NA'} "
                     f"min_battery={_fmt(row.get('minimum_bus_battery'), 2)} "
                     f"battery_viol={_fmt(row.get('battery_safety_violation_count'), 0)} "
-                    f"term={row.get('termination_reason') or 'NA'} elapsed={_fmt(row.get('runtime_sec'), 1)}s"
+                    f"term={row.get('termination_reason') or 'NA'} "
+                    f"replay_insertions={int(row.get('replay_insertions_episode', 0))} "
+                    f"completed_transitions={int(row.get('completed_transition_count', 0))} "
+                    f"buffer_len={int(row.get('buffer_len', 0))} "
+                    f"buffer_total_added={int(row.get('buffer_total_added', 0))} "
+                    f"elapsed={_fmt(row.get('runtime_sec'), 1)}s"
                 )
                 print(msg, flush=True)
             if progress_every > 0 and (((ep + 1) % progress_every == 0) or (ep + 1 == episodes)):
                 export_training_curve(str(out), instance_name, method, int(seed), rows, smoke=bool(smoke_test))
-            ckpt_payload = agent.checkpoint_dict() | {"episode": ep + 1, "global_step": agent.steps, "epsilon": agent._eps(), "training_config": effective_cfg, "best_metric": best_metric}
+            ckpt_payload = agent.checkpoint_dict() | {"episode": ep + 1, "global_step": agent.steps, "epsilon": agent._eps(), "training_config": effective_cfg, "best_metric": best_metric, "buffer_total_added": buffer_total_added}
             if (ep + 1) % ckpt_last_every == 0:
                 torch.save(ckpt_payload, out / "checkpoints" / f"checkpoint_{method}_{instance_name}_seed_{seed}_last.pt")
             if (ep + 1) % ckpt_periodic_every == 0:

@@ -139,6 +139,7 @@ class DQNDRAgent:
             "action_set": self.cfg.get("action_set_seconds"),
             "normalization": self.cfg.get("normalization", {}),
             "metadata": metadata,
+            "buffer_total_added": int(getattr(self.buffer, "total_added", 0)),
         }
 
     def save_checkpoint(self, path):
@@ -165,3 +166,5 @@ class DQNDRAgent:
             self.optim.load_state_dict(ck["optimizer"])
         self.steps = int(ck.get("steps", 0))
         self.action_dim = int(ck.get("action_dim", self.action_dim))
+        if hasattr(self.buffer, "total_added"):
+            self.buffer.total_added = int(ck.get("buffer_total_added", len(self.buffer)))
